@@ -1,0 +1,10 @@
+loaded_tiles
+build
+AOI2List
+__pycache__
+.vscode
+laszip-python
+saved_file_lists
+locations
+*.ipynb
+*.ps1
