@@ -9,7 +9,8 @@ from multiprocessing import freeze_support
 # ---------- configuration ----------
 VERBOSE = 1
 # -----------------------------------
-# 1. Per‑tile pipeline template (denoise → classify → select ground)
+
+
 def make_pipeline(input_laz, output_laz):
     return json.dumps([
         input_laz,
@@ -19,7 +20,7 @@ def make_pipeline(input_laz, output_laz):
             "mean_k": 8,
             "multiplier": 2.0
         },
-        {   # ground classification (your tuned parameters)
+        {   # ground classification (tuned parameters)
             "type": "filters.smrf",
             "cell": 1.0,
             "window": 24.0,
@@ -40,6 +41,7 @@ def make_pipeline(input_laz, output_laz):
         }
     ])
 
+
 def make_dtm_pipeline(input_laz, output_tif):
     return json.dumps([
         input_laz,
@@ -55,33 +57,11 @@ def make_dtm_pipeline(input_laz, output_tif):
             "gdaldriver": "GTiff"
         }
     ])
-def is_valid_laz(path):
-    try:
-        pipe = pdal.Pipeline(json.dumps([
-            {"type": "readers.las", "filename": str(path)},
-            {"type": "filters.head", "count": 1}
-        ]))
-        pipe.execute()
-        return True
-    except Exception:
-        return False
 
-def is_valid_tif(path):
-    try:
-        ds = gdal.Open(str(path))
-        if ds is None:
-            return False
-        ds.GetRasterBand(1)
-        ds = None
-        return True
-    except Exception:
-        return False
 
 def warp_progress(complete, message, user_data):
     """Print progress percentage every time it changes."""
-    # `complete` is a float between 0.0 and 1.0
     pct = int(complete * 100)
-    # Print only when percentage changes (optional, avoids flooding)
     if not hasattr(warp_progress, "last_pct") or pct != warp_progress.last_pct:
         print(f"Warp progress: {pct}% - {message}")
         warp_progress.last_pct = pct
@@ -95,7 +75,6 @@ def warp_to_4326_auto(input_tiles, output_tif, resample="bilinear", nodata=-9999
     EPSG:4326 using the EXACT input resolution converted to degrees.
     All parameters (resolution, bounds, data type) are taken from the input files.
     """
-    # Keep only tiles that already have a CRS (others must be pre-assigned)
     input_tiles = [str(p) for p in input_tiles if gdal.Open(str(p)).GetProjection()]
     if not input_tiles:
         raise ValueError("No input tiles with a valid CRS found.")
@@ -113,8 +92,7 @@ def warp_to_4326_auto(input_tiles, output_tif, resample="bilinear", nodata=-9999
     src_dtype = first_ds.GetRasterBand(1).DataType
     first_ds = None
 
-    # Extract an EPSG:XXXX string from the WKT (pyproj works best with that)
-    from osgeo import osr
+    # Extract EPSG string from WKT
     srs = osr.SpatialReference()
     srs.ImportFromWkt(src_wkt)
     auth = srs.GetAuthorityName(None)
@@ -147,7 +125,7 @@ def warp_to_4326_auto(input_tiles, output_tif, resample="bilinear", nodata=-9999
 
     # 4. Transform four corners to WGS84 → output bounds
     corners = [(min_x, min_y), (min_x, max_y), (max_x, max_y), (max_x, min_y)]
-    lonlat = [trans.transform(x, y) for x, y in corners]   # each is (lon, lat)
+    lonlat = [trans.transform(x, y) for x, y in corners]
     lon_min = min(pt[0] for pt in lonlat)
     lon_max = max(pt[0] for pt in lonlat)
     lat_min = min(pt[1] for pt in lonlat)
@@ -161,7 +139,6 @@ def warp_to_4326_auto(input_tiles, output_tif, resample="bilinear", nodata=-9999
     deg_per_pixel_x = abs(lon_east - centre_lon)
     deg_per_pixel_y = abs(lat_north - centre_lat)
 
-    # Print diagnostics – these must be ~3.6e-06 for meters, not 122
     if VERBOSE > 0:
         print(f"Centre (source): {centre_x:.1f}, {centre_y:.1f}")
         print(f"Centre (WGS84):   {centre_lon:.8f}, {centre_lat:.8f}")
@@ -198,6 +175,8 @@ def warp_to_4326_auto(input_tiles, output_tif, resample="bilinear", nodata=-9999
     ds = None
     print("\nDone!")
     return output_tif
+
+
 def process_tiles(AREA):
     INPUT_DIR = Path(f"loaded_tiles/{AREA}")
     RAW_DIR = INPUT_DIR / "raw_tiles"
@@ -205,18 +184,14 @@ def process_tiles(AREA):
     DTM_DIR = INPUT_DIR / "dtm_tiles"
     GROUND_DIR.mkdir(parents=True, exist_ok=True)
     DTM_DIR.mkdir(parents=True, exist_ok=True)
-    # 2. Process each tile
+
     laz_files = sorted(RAW_DIR.glob("*.laz"))
     for i, laz_path in enumerate(laz_files):
         out_path = GROUND_DIR / f"{laz_path.stem}_ground.laz"
         if out_path.exists() and out_path.stat().st_size > 0:
-            # if is_valid_laz(out_path):
-            #     if VERBOSE > 1: print(f"[{i}/{len(laz_files)}] Skipping {laz_path.name} – already processed")
-            #     continue
-            # if VERBOSE > 0: print(f"[{i}/{len(laz_files)}] Corrupted ground file, recreating: {out_path.name}")
-            # out_path.unlink()
             continue
-        if VERBOSE > 0: print(f"[{i}/{len(laz_files)}] Processing {laz_path.name} …")
+        if VERBOSE > 0:
+            print(f"[{i}/{len(laz_files)}] Processing {laz_path.name} …")
         pipeline_json = make_pipeline(str(laz_path), str(out_path))
         pipe = pdal.Pipeline(pipeline_json)
         pipe.execute()
@@ -224,31 +199,50 @@ def process_tiles(AREA):
     for i, ground_file in enumerate(sorted(GROUND_DIR.glob("*.laz"))):
         dtm_out = DTM_DIR / f"{ground_file.stem.replace('_ground', '')}_dtm.tif"
         if dtm_out.exists() and dtm_out.stat().st_size > 0:
-            # if is_valid_tif(dtm_out):
-            #     if VERBOSE > 1: print(f"[{i}] Skipping {ground_file.name} – DTM already exists")
-            #     continue
-            # if VERBOSE > 0: print(f"[{i}] Corrupted DTM tile, recreating: {dtm_out.name}")
-            # dtm_out.unlink()
             continue
-        if VERBOSE > 0: print(f"[{i}] Generating DTM for {ground_file.name} …")
+        if VERBOSE > 0:
+            print(f"[{i}] Generating DTM for {ground_file.name} …")
         dtm_pipeline_json = make_dtm_pipeline(str(ground_file), str(dtm_out))
         pdal.Pipeline(dtm_pipeline_json).execute()
 
-    # 3. Merge all dtm tiles into one (optional, but often useful)
     dtm_tiles = sorted(DTM_DIR.glob("*.tif"))
     output_path = INPUT_DIR / "merged_dtm.tif"
     if output_path.exists():
-        if VERBOSE > 0: print(f"Skipping merge – {output_path.name} already exists")
+        if VERBOSE > 0:
+            print(f"Skipping merge – {output_path.name} already exists")
     else:
-        if VERBOSE > 0: print(f"Merging {len(dtm_tiles)} DTM tiles into {output_path.name} …")
+        if VERBOSE > 0:
+            print(f"Merging {len(dtm_tiles)} DTM tiles into {output_path.name} …")
         warp_to_4326_auto(dtm_tiles, output_path, callback=warp_progress)
-        if VERBOSE > 0: print(f"Done! Output: {output_path.name}")
+        if VERBOSE > 0:
+            print(f"Done! Output: {output_path.name}")
+
+def merge_dtms():
+    base = Path("loaded_tiles")
+    dtm_tiles = []
+    for area_dir in sorted(base.glob("Hopewell_Road_*/dtm_tiles")):
+        dtm_tiles.extend(sorted(area_dir.glob("*.tif")))
+    for area_dir in sorted(base.glob("Circleville_Road_*/dtm_tiles")):
+        dtm_tiles.extend(sorted(area_dir.glob("*.tif")))
+
+    if not dtm_tiles:
+        print("No DTM tiles found.")
+        return
+
+    output_path = base / "Whole_Road" / "merged_dtm.tif"
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    print(f"Found {len(dtm_tiles)} DTM tiles — warping to {output_path}")
+    warp_to_4326_auto(dtm_tiles, output_path, callback=warp_progress)
+
+
 if __name__ == "__main__":
+    merge_dtms()
+    '''
     freeze_support()
     areas = [f"Circleville_Road_{i}" for i in range(4, 10)]
-    # areas =["Hart_Island_2014", "Hart_Island_2015", "Hart_Island_2021", "Hart_Island_2023"]
     with ProcessPoolExecutor(max_workers=3) as executor:
         futures = [executor.submit(process_tiles, name) for name in areas]
         for future in as_completed(futures):
-            future.result()   # raises any exception that occurred
-    
+            future.result()
+
+    '''

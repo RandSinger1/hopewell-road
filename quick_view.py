@@ -12,7 +12,7 @@ import numpy as np
 from osgeo import gdal
 import matplotlib.pyplot as plt
 
-def quick_view_dtm(input_path, sample_step=10, cmap='viridis', figsize=(12, 8)):
+def quick_view_dtm(input_path, sample_step=10, cmap='viridis', figsize=(12, 8), outpath = None):
     """
     Display a low‑resolution version of a DTM with coordinate axes.
 
@@ -82,13 +82,16 @@ def quick_view_dtm(input_path, sample_step=10, cmap='viridis', figsize=(12, 8)):
     plt.plot(newark[1], newark[0], 'ro')
     plt.plot(chilicothe[1], chilicothe[0], 'ro')
     plt.tight_layout()
-    plt.show()
+    if outpath:
+        plt.savefig(outpath)
+    else:
+        plt.show()
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Quickly view a large DTM at low resolution")
-    parser.add_argument("--input", type = str, default = "loaded_tiles/Circleville_Road/merged_dtm.tif",
+    parser.add_argument("--input", type = str, default = "loaded_tiles/Whole_Road/merged_dtm.tif",
                         help="Input GeoTIFF file")
-    parser.add_argument("--step", type=int, default=1000,
+    parser.add_argument("--step", type=int, default=100,
                         help="Sampling step (every Nth pixel), default=10")
     parser.add_argument("--cmap", type=str, default="terrain",
                         help="Colormap, e.g., terrain, jet, viridis")
@@ -97,4 +100,4 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     figsize = tuple(map(int, args.figsize.split(',')))
-    quick_view_dtm(args.input, sample_step=args.step, cmap=args.cmap, figsize=figsize)
+    quick_view_dtm(args.input, sample_step=args.step, cmap=args.cmap, figsize=figsize, outpath="quick_view.png")

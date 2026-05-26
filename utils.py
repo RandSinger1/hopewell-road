@@ -1,4 +1,5 @@
 import numpy as np
+
 FEET = 0
 METERS = 1
 DEGREES = 2
@@ -85,3 +86,21 @@ def convert_meters_degrees_pixels(src, out, x, y, window=None, extent=None):
             meters_y = latitude * 364000.0
             return meters_x, meters_y
     raise ValueError(f"Unsupported conversion from {src} to {out}")
+
+
+def make_gdal_progress_callback(label: str = "Progress"):
+    """Return a GDAL-compatible progress callback that prints percentage updates.
+
+    Usage:
+        gdal.Warp(..., callback=make_gdal_progress_callback("Merge"))
+    """
+    state = {"last_pct": -1}
+
+    def callback(complete, message, user_data):
+        pct = int(complete * 100)
+        if pct != state["last_pct"]:
+            print(f"{label}: {pct}% - {message}")
+            state["last_pct"] = pct
+        return 1   # 1 = continue, 0 = cancel
+
+    return callback

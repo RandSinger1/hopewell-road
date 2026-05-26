@@ -1,0 +1,17 @@
+numpy
+scipy
+scikit-image
+scikit-learn
+laspy[lazrs]
+shapely
+pyproj
+xarray
+xrspatial
+opencv-python
+Pillow
+matplotlib
+requests
+
+# GDAL and PDAL are not reliably installable via pip.
+# Install them first via conda before running pip install:
+#   conda install -c conda-forge gdal python-pdal

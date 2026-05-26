@@ -33,7 +33,7 @@ def tile_polygon(filepath, polygon_vertices, size_x, size_y, overlap):
     hopewell_road_polygon = Polygon([(y, x) for x, y in hopewell_road_polygon])
 
     # Create Shapely polygon
-    poly = Polygon(polygon_vertices)
+    poly = Polygon(hopewell_road_polygon)
 
     # Get bounding box of the polygon
     minx, miny, maxx, maxy = poly.bounds
@@ -70,7 +70,7 @@ def tile_polygon(filepath, polygon_vertices, size_x, size_y, overlap):
     return coords
 def main(multicore = True):
     
-    filepath ='loaded_tiles/Circleville_Road/merged_dtm.tif'
+    filepath ='loaded_tiles/Whole_Road/merged_dtm.tif'
     circleville =(39.6,-82.9)
     newark = (40.0, -82.4)
     chilicothe = (39.3,-82.9)
@@ -87,19 +87,23 @@ def main(multicore = True):
     }
     output_dir = Path('locations') / f'{size_x}_{size_y}'
     metadata_path = Path(output_dir) / 'metadata.json'
+    output_dir.mkdir(exist_ok=False)
     json.dump(metadata, metadata_path.open('w'))
     coords = tile_polygon(filepath, polygon_vertices, size_x, size_y, overlap/size_x)
     print(f"Tiles to search: {len(coords)}")
-    max_workers = 6
+    max_workers = 3
+    total = len(coords)
     if multicore:
         with ProcessPoolExecutor(max_workers=max_workers) as executer:
             args_list = [(filepath, coord, size_x, size_y, output_dir) for coord in coords]
-            futures =[executer.submit(search_region, *args) for args in args_list]
-            for future in futures:
+            futures = [executer.submit(search_region, *args) for args in args_list]
+            for i, future in enumerate(futures, 1):
                 future.result()
+                print(f"Progress: {i}/{total} ({100*i//total}%)")
 
     else:
-        for coord in coords:
-            search_region(filepath, coord, size_x, size_y, output_dir)
+        for i, coord in enumerate(coords, 1):
+            search_region(filepath, coord, size_x, size_y, output_dir, picture=False)
+            print(f"Progress: {i}/{total} ({100*i//total}%)")
 if __name__ == '__main__':
     main()

@@ -8,3 +8,5 @@ saved_file_lists
 locations
 *.ipynb
 *.ps1
+*.png
+*.json

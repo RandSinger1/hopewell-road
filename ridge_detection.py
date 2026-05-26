@@ -14,83 +14,15 @@ from process_dtm import displayWindow, getGTAndBand, get_window, filter_image
 
 def hessian_ridge_orientation(image, sigma=1.0):
     """Return ridge orientation (radians, [0, π)) from Hessian."""
-    from scipy.ndimage import gaussian_filter
-    import numpy as np
-
     img_smooth = gaussian_filter(image.astype(np.float64), sigma=sigma)
     Iy, Ix = np.gradient(img_smooth)
     Iyy, Iyx = np.gradient(Iy)
     Ixy, Ixx = np.gradient(Ix)   # Ixy == Iyx
 
-    # Standard ridge direction formula
-    # The angle of the smaller principal curvature is:
     theta = 0.5 * np.arctan2(2 * Ixy, Ixx - Iyy)   # range [-π/2, π/2]
-    # Add π/2 to get the **ridge** direction (along the ridge, not across it)
     orient = theta + np.pi / 2.0
-    # Map to [0, π)
     orient = np.mod(orient, np.pi)
     return orient.astype(np.float32)
-
-# def hessian_ridge_orientation(image, sigma=1.0, absolute=True):
-#     """
-#     Compute ridge orientation (angle in radians) from the Hessian matrix.
-#     Returns orientation of the RIDGE (along the ridge), not the gradient.
-
-#     Parameters
-#     ----------
-#     image : 2D array
-#     sigma : float
-#         Gaussian smoothing before derivative computation.
-#     absolute : bool
-#         If True, angle is measured from positive x‑axis (0 = horizontal),
-#         range [-π/2, π/2] (mod π). If False, full [0, 2π) gradient direction.
-
-#     Returns
-#     -------
-#     angle : 2D array of float (radians), same shape as image.
-#         NaN where Hessian cannot be computed.
-#     """
-#     # Smooth
-#     img_smooth = gaussian_filter(image.astype(np.float64), sigma=sigma)
-#     # First derivatives
-#     Iy, Ix = np.gradient(img_smooth)
-#     Iyy, Iyx = np.gradient(Iy)
-#     Ixy, Ixx = np.gradient(Ix)   # Ixy == Iyx
-#     # Hessian for each pixel
-#     # Eigenvalues of [[Ixx, Ixy],[Ixy, Iyy]]
-#     # For a bright ridge on dark background, across-ridge second derivative is negative,
-#     # the larger eigenvalue (less negative) is along-ridge. The eigenvector of the
-#     # more negative eigenvalue is across-ridge.
-#     # Compute eigenvalues (λ1 ≤ λ2). For typical ridge: λ1 << 0, λ2 near 0.
-#     # Eigenvector for λ2 is along ridge.
-#     rows, cols = img_smooth.shape
-#     angle = np.full((rows, cols), np.nan, dtype=np.float32)
-#     # Process only valid pixels (skip edges with zero gradient to avoid singular Hessian)
-#     # We'll compute using analytic formula for 2x2 symmetric matrix
-#     # Let H = [[a, b],[b, c]].
-#     a = Ixx
-#     b = Ixy
-#     c = Iyy
-#     det = a * c - b * b
-#     trace = a + c
-#     # Eigenvalues: (trace ± sqrt(trace^2 - 4*det)) / 2
-#     discriminant = np.maximum(trace**2 - 4*det, 0)
-#     sqrt_disc = np.sqrt(discriminant)
-#     lam1 = (trace - sqrt_disc) / 2.0   # smaller
-#     lam2 = (trace + sqrt_disc) / 2.0   # larger
-
-#     # The eigenvector for λ2 (the larger eigenvalue) satisfies (a-λ2)*vx + b*vy = 0
-#     # We'll compute the angle of that vector: tan(θ) = vy/vx.
-#     # Using formula: eigenvector v for λ is orthogonal to (a-λ, b). So direction = atan2( -(a-λ), b )
-#     # Actually, if λ is eigenvalue, then (H - λI)v = 0 => choose v perpendicular to (a-λ, b) or (b, c-λ).
-#     # For eigenvector corresponding to λ2, we can compute:
-#     # vx = -(c - λ2) or b, vy = b or (a - λ2)? Let's use that v = (b, λ2 - a) is orthogonal to (a-λ2, b)
-#     # because dot((a-λ2, b), (b, λ2-a)) = (a-λ2)*b + b*(λ2-a) = 0. So v = (b, λ2-a) is an eigenvector for λ2.
-#     # Thus angle = atan2(λ2 - a, b).
-#     with np.errstate(divide='ignore', invalid='ignore'):
-#         angle_vals = np.arctan2(lam2 - a, b)   # returns angle in [-π, π]
-#     angle_vals[~np.isfinite(angle_vals)] = np.nan
-#     return angle_vals
 
 
 def detect_parallel_walls_ridge_pairing(
@@ -126,18 +58,7 @@ def detect_parallel_walls_ridge_pairing(
     spacing_px = convert_meters_degrees_pixels(METERS, PIXELS, spacing_meters, 0, ridge_map, extent)[0]
     min_ridge_length_px = convert_meters_degrees_pixels(METERS, PIXELS, min_ridge_length_meters, 0, ridge_map, extent)[0]
 
-    # ---------- 1. Orientation mask (robust gradient method) ----------
-    def gradient_ridge_orientation(image, sigma=2.0):
-        from scipy.ndimage import gaussian_filter
-        img = gaussian_filter(image.astype(np.float64), sigma=sigma)
-        Gy, Gx = np.gradient(img)
-        # gradient points across the ridge; ridge direction is perpendicular + π/2
-        grad_angle = np.arctan2(Gy, Gx)          # [-π, π]
-        ridge_angle = grad_angle + np.pi / 2
-        ridge_angle = np.mod(ridge_angle, np.pi) # [0, π)
-        return ridge_angle.astype(np.float32)
-
-    # TODO: Should we use the gradient method? Should we use the hessian method?
+    # ---------- 1. Orientation mask ----------
     orient_rad = hessian_ridge_orientation(ridge_map, sigma=2.0)
     target_rad = np.deg2rad(target_angle)
     angle_diff = np.abs(orient_rad - target_rad)
@@ -150,17 +71,12 @@ def detect_parallel_walls_ridge_pairing(
     # ...
 
     # ---------- 2. Threshold & create binary mask ----------
-    # TODO: Is this really necesary?  Kinda just looks worse than the original binary.
     binary = (ridge_map > ridge_threshold) & orientation_mask
-    binary = remove_small_objects(binary, max_size=800, connectivity=10)   # remove tiny noise
-    # plt.imshow(binary); plt.show()
+    binary = remove_small_objects(binary, max_size=800, connectivity=10)
 
     # ---------- 3. Robust skeletonization (works for all angles) ----------
     binary_closed = binary_closing(binary, footprint=disk(1.5))
     skeleton = medial_axis(binary_closed, return_distance=False)
-    # TODO i think this needs to be removed permanently
-    # skeleton = remove_small_objects(skeleton, max_size=max(5, min_ridge_length_px // 4))
-    # plt.imshow(skeleton); plt.show()
 
     # ---------- 4. Fit a straight line to each connected component ----------
     labeled = label_function(skeleton)
@@ -253,7 +169,6 @@ def detect_parallel_walls_ridge_pairing(
         return pairs, (binary, skeleton, orientation_mask)
     return pairs
 
-import numpy as np
 
 def remove_invalid_pairs(
     pairs,
@@ -337,7 +252,7 @@ def remove_invalid_pairs(
 
     return filtered    
 
-def search_region(filepath: str, coordinates: tuple[float, float], size_x_meters: float, size_y_meters: float, output_dir: Path, verbose: int = 0):
+def search_region(filepath: str, coordinates: tuple[float, float], size_x_meters: float, size_y_meters: float, output_dir: Path, verbose: int = 0, picture: bool = False):
     output_path = Path(output_dir) / f"{round(coordinates[0], 4)}_{round(coordinates[1], 4)}"
     if output_path.exists():
         return
@@ -367,8 +282,8 @@ def search_region(filepath: str, coordinates: tuple[float, float], size_x_meters
         extent=extent,
         spacing_meters=40,         # Meters
         angle_tolerance=angle_tolerance,
-        spacing_tolerance=.4,
-        ridge_threshold=0,
+        spacing_tolerance=.2,
+        ridge_threshold=.1,
         min_ridge_length_meters=50,
         overlap_ratio=0.3,
         return_debug=False,
@@ -385,13 +300,23 @@ def search_region(filepath: str, coordinates: tuple[float, float], size_x_meters
             cmap= 'terrain',
             title=f"Hopewell Road DTM",
             lines = pairs,
-            filepath = output_path
+            filepath = output_path,
+            picture = picture
+        )
+    else:
+        displayWindow(
+            window_original, 
+            extent, 
+            cmap= 'terrain',
+            title=f"Hopewell Road DTM",
+            filepath = output_path,
+            picture = picture
         )
     print(f'Searched {size_x_meters}m x {size_y_meters}m region at {coordinates[0]}, {coordinates[1]}')
 def main():
     walls = (40.0,-82.4)
     weird_thing = (40.0, -82.4)
-    search_region("loaded_tiles/Hopewell_Road/merged_dtm.tif", walls, 200, 200, Path("locations"))
+    search_region("loaded_tiles/Hopewell_Road/merged_dtm.tif", walls, 200, 200, Path("locations"), picture=False)
 
 if __name__ == "__main__":
     main()

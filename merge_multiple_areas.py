@@ -7,18 +7,11 @@ No resampling, reprojection, or value modification is applied.
 Uses GDAL's Warp functionality (faster than gdal_merge.py for many files).
 """
 
-import sys
 from pathlib import Path
 from osgeo import gdal
-def callback(pct, message, user_data):
-    """Print progress percentage every time it changes."""
-    # `pct` is a float between 0.0 and 1.0
-    pct = int(pct * 100)
-    # Print only when percentage changes (optional, avoids flooding)
-    if not hasattr(callback, "last_pct") or pct != callback.last_pct:
-        print(f"Merge progress: {pct}% - {message}")
-        callback.last_pct = pct
-    return 1   # 1 = continue, 0 = cancel
+from utils import make_gdal_progress_callback
+
+
 def merge_dtms(input_files, output_path, merge_alg="last", nodata=None, verbose=True):
     """
     Merge a list of raster files into a single mosaic.
@@ -32,7 +25,7 @@ def merge_dtms(input_files, output_path, merge_alg="last", nodata=None, verbose=
     merge_alg : str, optional
         Algorithm for overlapping cells: "last" (default), "first", "min", "max",
         "mean", "blend". "last" means the value from the last file in the list
-        will be used; for non‑overlapping tiles it doesn't matter.
+        will be used; for non-overlapping tiles it doesn't matter.
     nodata : float, optional
         NoData value to use for the output. If None, GDAL will determine it
         from the input files.
@@ -45,23 +38,22 @@ def merge_dtms(input_files, output_path, merge_alg="last", nodata=None, verbose=
     if verbose:
         print(f"Merging {len(input_files)} files into {output_path}")
 
-    # Use gdal.Warp with a VRT as the source (handles many files efficiently)
     ds = gdal.Warp(
         output_path,
         input_files,
-        resampleAlg=gdal.GRIORA_NearestNeighbour,  # no interpolation
+        resampleAlg=gdal.GRIORA_NearestNeighbour,
         creationOptions=["COMPRESS=LZW", "TILED=YES", "BIGTIFF=YES"],
-        callback=callback
+        callback=make_gdal_progress_callback("Merge")
     )
     ds = None
     if verbose:
         print("Merge complete.")
 
+
 if __name__ == "__main__":
-    input_tifs = [Path(f"loaded_tiles\\Circleville_Road_{i}\\merged_dtm.tif") for i in range(10)]
-    output_file = Path(f"loaded_tiles\\Circleville_Road\\merged_dtm.tif")
-    # Optional: filter out non‑exist ing files
-    existing = [f for f in input_tifs if Path(f).exists()]
+    input_tifs = [Path("loaded_tiles\\Circleville_Road\\merged_dtm.tif"), Path("loaded_tiles\\Hopewell_Road\\merged_dtm.tif")]#[Path(f"loaded_tiles\\Circleville_Road_{i}\\merged_dtm.tif") for i in range(10)]
+    output_file = Path("loaded_tiles\\Whole_Road\\merged_dtm.tif")
+    existing = [f for f in input_tifs if f.exists()]
     if len(existing) != len(input_tifs):
         print(f"Warning: {len(input_tifs) - len(existing)} file(s) not found, skipping.")
 
