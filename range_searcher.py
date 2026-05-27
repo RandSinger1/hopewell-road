@@ -87,11 +87,11 @@ def main(multicore = True):
     }
     output_dir = Path('locations') / f'{size_x}_{size_y}'
     metadata_path = Path(output_dir) / 'metadata.json'
-    output_dir.mkdir(exist_ok=False)
+    #output_dir.mkdir(exist_ok=False)
     json.dump(metadata, metadata_path.open('w'))
     coords = tile_polygon(filepath, polygon_vertices, size_x, size_y, overlap/size_x)
     print(f"Tiles to search: {len(coords)}")
-    max_workers = 3
+    max_workers = 10
     total = len(coords)
     if multicore:
         with ProcessPoolExecutor(max_workers=max_workers) as executer:

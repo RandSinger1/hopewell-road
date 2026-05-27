@@ -254,7 +254,7 @@ def remove_invalid_pairs(
 
 def search_region(filepath: str, coordinates: tuple[float, float], size_x_meters: float, size_y_meters: float, output_dir: Path, verbose: int = 0, picture: bool = False):
     output_path = Path(output_dir) / f"{round(coordinates[0], 4)}_{round(coordinates[1], 4)}"
-    if output_path.exists():
+    if (output_path / "line_overlay.json").exists():
         return
     makedirs(output_path, exist_ok=True)
     gt, band, nodata, ds = getGTAndBand(filepath)

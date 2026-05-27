@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>KhthonLiDAR Viewer</title>
+  <link rel="stylesheet"
+        href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        crossorigin="" />
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+
+  <!-- ── Sidebar ──────────────────────────────────────────────── -->
+  <aside id="sidebar">
+
+    <div id="sidebar-header">
+      <span id="sidebar-title">KhthonLiDAR</span>
+      <button id="sidebar-toggle" title="Collapse sidebar">&#x25C4;</button>
+    </div>
+
+    <div class="section" id="section-folder">
+      <div class="section-label">Locations Folder</div>
+      <div class="row">
+        <select id="folder-select">
+          <option value="">— select —</option>
+        </select>
+      </div>
+      <div class="row">
+        <input type="text" id="folder-input" placeholder="or type path…" />
+        <button class="btn" onclick="applyFolder()">Load</button>
+      </div>
+      <div class="status" id="lines-status"></div>
+    </div>
+
+    <div class="section" id="section-dtm">
+      <div class="section-label">DTM GeoTIFF</div>
+      <div class="row">
+        <input type="text" id="dtm-input" placeholder="path/to/merged_dtm.tif" />
+        <button class="btn" onclick="applyDtm()">Load</button>
+      </div>
+      <div class="status" id="dtm-status"></div>
+    </div>
+
+    <div class="section" id="section-layers">
+      <div class="section-label">Layers</div>
+
+      <label class="toggle-row">
+        <input type="checkbox" id="chk-dtm" checked onchange="toggleDtm(this.checked)" />
+        <span>DTM overlay</span>
+      </label>
+      <div class="row opacity-row">
+        <span class="dim">opacity</span>
+        <input type="range" id="dtm-opacity" min="0" max="100" value="75"
+               oninput="setDtmOpacity(this.value)" />
+      </div>
+
+      <label class="toggle-row">
+        <input type="checkbox" id="chk-lines" checked onchange="toggleLines(this.checked)" />
+        <span>Detected lines</span>
+      </label>
+
+      <label class="toggle-row">
+        <input type="checkbox" id="chk-ref" checked onchange="toggleRef(this.checked)" />
+        <span>Reference lines</span>
+      </label>
+
+      <label class="toggle-row">
+        <input type="checkbox" id="chk-hide-roads" onchange="_scheduleLineLoad()" />
+        <span>Hide roads</span>
+      </label>
+    </div>
+
+    <div class="section" id="section-info">
+      <div class="section-label">Map Info</div>
+      <div class="info-row"><span class="dim">Zoom</span><span id="info-zoom">—</span></div>
+      <div class="info-row"><span class="dim">Lines shown</span><span id="info-lines">0</span></div>
+      <div class="info-row">
+        <span class="dim">Center</span>
+        <span id="info-center">—</span>
+        <button class="copy-btn" onclick="copyCenter()" title="Copy coordinates">⎘</button>
+      </div>
+    </div>
+
+    <div class="section" id="section-sites">
+      <div class="section-label">Reference Sites</div>
+      <div class="site-row">
+        <span class="dim site-name">Newark</span>
+        <input type="number" step="any" id="site-newark-lat" class="coord-input" placeholder="lat" />
+        <input type="number" step="any" id="site-newark-lon" class="coord-input" placeholder="lon" />
+      </div>
+      <div class="site-row">
+        <span class="dim site-name">Chillicothe</span>
+        <input type="number" step="any" id="site-chilli-lat" class="coord-input" placeholder="lat" />
+        <input type="number" step="any" id="site-chilli-lon" class="coord-input" placeholder="lon" />
+      </div>
+      <div class="site-row">
+        <span class="dim site-name">Circleville</span>
+        <input type="number" step="any" id="site-circle-lat" class="coord-input" placeholder="lat" />
+        <input type="number" step="any" id="site-circle-lon" class="coord-input" placeholder="lon" />
+      </div>
+      <div class="row">
+        <button class="btn" onclick="applySites()">Update</button>
+      </div>
+    </div>
+
+    <div class="section" id="section-legend">
+      <div class="section-label">Legend</div>
+      <div class="legend-row">
+        <span class="legend-line detected"></span>
+        <span>Detected wall pair</span>
+      </div>
+      <div class="legend-row">
+        <span class="legend-line newark-chilli"></span>
+        <span>Newark → Chillicothe</span>
+      </div>
+      <div class="legend-row">
+        <span class="legend-line newark-circleville"></span>
+        <span>Newark → Circleville (arch)</span>
+      </div>
+    </div>
+
+  </aside>
+
+  <!-- ── Map ──────────────────────────────────────────────────── -->
+  <main id="map-container">
+    <div id="map"></div>
+    <div id="loading-indicator">Rendering DTM…</div>
+  </main>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+          crossorigin=""></script>
+  <script src="/static/map.js"></script>
+</body>
+</html>

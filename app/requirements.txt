@@ -1,0 +1,6 @@
+flask>=2.3
+waitress>=3.0
+Pillow>=9.0
+# GDAL is expected from the conda environment (osgeo.gdal).
+# If not available, install rasterio as a fallback:
+# rasterio>=1.3

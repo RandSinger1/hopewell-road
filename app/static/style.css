@@ -1,0 +1,307 @@
+/* ── Reset & base ──────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg:         #10151e;
+  --sidebar-bg: #151c2b;
+  --header-bg:  #0d1424;
+  --border:     #1e2d45;
+  --accent:     #4ca3d8;
+  --text:       #d4dce8;
+  --dim:        #6a85a4;
+  --btn-bg:     #1a4a80;
+  --btn-hover:  #2265a8;
+  --input-bg:   #0d1424;
+  --input-border:#243550;
+  --status:     #5a8fc0;
+  --sidebar-w:  270px;
+}
+
+html, body {
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  font-size: 13px;
+  overflow: hidden;
+}
+
+/* ── Layout ────────────────────────────────────────────────────── */
+body { display: flex; }
+
+#sidebar {
+  width: var(--sidebar-w);
+  flex-shrink: 0;
+  background: var(--sidebar-bg);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  overflow-x: hidden;
+  transition: width 0.2s ease;
+  z-index: 1000;
+}
+
+#sidebar.collapsed {
+  width: 32px;
+}
+#sidebar.collapsed .section,
+#sidebar.collapsed #sidebar-title {
+  display: none;
+}
+
+#map-container {
+  flex: 1;
+  position: relative;
+  min-width: 0;
+}
+
+#map {
+  width: 100%;
+  height: 100%;
+  background: #0b1017;
+}
+
+/* ── Sidebar header ────────────────────────────────────────────── */
+#sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 10px 12px 14px;
+  background: var(--header-bg);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+#sidebar-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--accent);
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+}
+
+#sidebar-toggle {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--dim);
+  width: 22px;
+  height: 22px;
+  cursor: pointer;
+  font-size: 11px;
+  border-radius: 3px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+#sidebar-toggle:hover { color: var(--text); border-color: var(--accent); }
+
+/* ── Sections ──────────────────────────────────────────────────── */
+.section {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.section-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.9px;
+  color: var(--dim);
+  margin-bottom: 8px;
+}
+
+/* ── Inputs & buttons ──────────────────────────────────────────── */
+.row {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 6px;
+  align-items: center;
+}
+
+input[type="text"],
+select {
+  flex: 1;
+  min-width: 0;
+  background: var(--input-bg);
+  border: 1px solid var(--input-border);
+  color: var(--text);
+  padding: 5px 8px;
+  border-radius: 3px;
+  font-size: 12px;
+  outline: none;
+}
+input[type="text"]:focus,
+select:focus { border-color: var(--accent); }
+select { cursor: pointer; }
+select option { background: var(--input-bg); }
+
+.btn {
+  background: var(--btn-bg);
+  color: var(--text);
+  border: none;
+  padding: 5px 10px;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 12px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.btn:hover { background: var(--btn-hover); }
+
+.status {
+  font-size: 11px;
+  color: var(--status);
+  min-height: 14px;
+  line-height: 1.4;
+}
+
+/* ── Toggles ───────────────────────────────────────────────────── */
+.toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+  cursor: pointer;
+}
+.toggle-row input[type="checkbox"] { cursor: pointer; accent-color: var(--accent); }
+
+.opacity-row {
+  margin-bottom: 8px;
+  padding-left: 20px;
+}
+.opacity-row input[type="range"] {
+  flex: 1;
+  accent-color: var(--accent);
+  height: 4px;
+}
+.dim { color: var(--dim); font-size: 11px; flex-shrink: 0; }
+
+/* ── Info panel ────────────────────────────────────────────────── */
+.info-row {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 4px;
+  font-size: 12px;
+}
+
+/* ── Legend ────────────────────────────────────────────────────── */
+.legend-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 5px;
+  font-size: 11px;
+  color: var(--dim);
+}
+.legend-line {
+  display: inline-block;
+  width: 28px;
+  height: 2px;
+  flex-shrink: 0;
+  border-top-width: 2px;
+  border-top-style: dashed;
+}
+.legend-line.detected         { border-top-color: #ff5533; border-top-style: solid; }
+.legend-line.newark-chilli    { border-top-color: #44aaff; }
+.legend-line.newark-circleville { border-top-color: #ffcc00; }
+
+/* ── Copy button ───────────────────────────────────────────────── */
+.copy-btn {
+  background: none;
+  border: 1px solid var(--input-border);
+  color: var(--dim);
+  padding: 1px 5px;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 12px;
+  flex-shrink: 0;
+  line-height: 1;
+}
+.copy-btn:hover { color: var(--accent); border-color: var(--accent); }
+
+/* ── Reference sites ───────────────────────────────────────────── */
+.site-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-bottom: 5px;
+}
+.site-name {
+  width: 66px;
+  flex-shrink: 0;
+}
+input.coord-input {
+  flex: 1;
+  min-width: 0;
+  background: var(--input-bg);
+  border: 1px solid var(--input-border);
+  color: var(--text);
+  padding: 4px 5px;
+  border-radius: 3px;
+  font-size: 11px;
+  outline: none;
+  /* hide browser spin buttons */
+  -moz-appearance: textfield;
+}
+input.coord-input::-webkit-outer-spin-button,
+input.coord-input::-webkit-inner-spin-button { -webkit-appearance: none; }
+input.coord-input:focus { border-color: var(--accent); }
+
+/* ── Loading indicator ─────────────────────────────────────────── */
+#loading-indicator {
+  display: none;
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(10, 20, 38, 0.9);
+  color: var(--accent);
+  padding: 6px 16px;
+  border-radius: 4px;
+  font-size: 12px;
+  border: 1px solid var(--border);
+  z-index: 800;
+  pointer-events: none;
+}
+
+/* ── Map overlay toggle button ─────────────────────────────────── */
+.map-toggle-btn {
+  background: rgba(13, 26, 45, 0.90);
+  color: var(--text);
+  border: 1px solid var(--border);
+  padding: 5px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  font-family: inherit;
+  letter-spacing: 0.3px;
+  transition: background 0.15s, border-color 0.15s;
+  display: block;
+  margin-bottom: 4px;
+}
+.map-toggle-btn:hover {
+  background: var(--btn-hover);
+  border-color: var(--accent);
+}
+.map-toggle-btn[data-active="false"] {
+  color: var(--dim);
+  border-color: #182636;
+  text-decoration: line-through;
+}
+
+/* ── Leaflet overrides ─────────────────────────────────────────── */
+.leaflet-control-zoom a {
+  background: var(--sidebar-bg) !important;
+  color: var(--text) !important;
+  border-color: var(--border) !important;
+}
+.leaflet-control-zoom a:hover {
+  background: var(--btn-hover) !important;
+}
+.leaflet-control-attribution {
+  background: rgba(10, 20, 38, 0.75) !important;
+  color: var(--dim) !important;
+  font-size: 10px !important;
+}
+.leaflet-control-attribution a { color: var(--status) !important; }

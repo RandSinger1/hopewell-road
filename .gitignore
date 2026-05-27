@@ -10,3 +10,5 @@ locations
 *.ps1
 *.png
 *.json
+app/.dtm_cache
+.claude
