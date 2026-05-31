@@ -6,6 +6,8 @@ from pyproj import Transformer
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from multiprocessing import freeze_support
 
+import params
+
 # ---------- configuration ----------
 VERBOSE = 1
 # -----------------------------------
@@ -17,18 +19,18 @@ def make_pipeline(input_laz, output_laz):
         {   # denoise (remove isolated noise points)
             "type": "filters.outlier",
             "method": "statistical",
-            "mean_k": 8,
-            "multiplier": 2.0
+            "mean_k": params.OUTLIER_MEAN_K,
+            "multiplier": params.OUTLIER_MULTIPLIER,
         },
-        {   # ground classification (tuned parameters)
+        {   # ground classification (SMRF — Pingel et al. 2013)
             "type": "filters.smrf",
-            "cell": 1.0,
-            "window": 24.0,
-            "slope": 0.2,
-            "threshold": 0.5,
-            "scalar": 1.25,
-            "cut": 0.0,
-            "returns": "last,only"
+            "cell": params.SMRF_CELL,
+            "window": params.SMRF_WINDOW,
+            "slope": params.SMRF_SLOPE,
+            "threshold": params.SMRF_THRESHOLD,
+            "scalar": params.SMRF_SCALAR,
+            "cut": params.SMRF_CUT,
+            "returns": params.SMRF_RETURNS,
         },
         {   # keep only ground points (class 2)
             "type": "filters.range",
@@ -52,8 +54,8 @@ def make_dtm_pipeline(input_laz, output_tif):
         {
             "type": "writers.gdal",
             "filename": output_tif,
-            "resolution": 1.0,
-            "output_type": "idw",
+            "resolution": params.DTM_RESOLUTION,
+            "output_type": params.DTM_INTERP_METHOD,
             "gdaldriver": "GTiff"
         }
     ])
@@ -68,20 +70,26 @@ def warp_progress(complete, message, user_data):
     return 1   # 1 = continue, 0 = cancel
 
 
-def warp_to_4326_auto(input_tiles, output_tif, resample="bilinear", nodata=-9999,
-                       creation_opts=None, callback=None):
+def warp_to_4326_auto(input_tiles, output_tif,
+                       resample=params.WARP_RESAMPLE,
+                       nodata=params.WARP_NODATA,
+                       creation_opts=None, callback=None,
+                       multithread=True):
     """
     Reproject a list of DTM tiles (any projected CRS with linear units) to
     EPSG:4326 using the EXACT input resolution converted to degrees.
     All parameters (resolution, bounds, data type) are taken from the input files.
     """
-    input_tiles = [str(p) for p in input_tiles if gdal.Open(str(p)).GetProjection()]
+    def _has_projection(p):
+        ds = gdal.Open(str(p))
+        return ds is not None and bool(ds.GetProjection())
+
+    input_tiles = [str(p) for p in input_tiles if _has_projection(p)]
     if not input_tiles:
         raise ValueError("No input tiles with a valid CRS found.")
 
     if creation_opts is None:
-        creation_opts = ["COMPRESS=LZW", "TILED=YES", "BLOCKXSIZE=256",
-                         "BLOCKYSIZE=256", "BIGTIFF=YES"]
+        creation_opts = params.WARP_CREATION_OPTS
 
     # 1. Read metadata from first tile
     first_ds = gdal.Open(input_tiles[0])
@@ -153,10 +161,16 @@ def warp_to_4326_auto(input_tiles, output_tif, resample="bilinear", nodata=-9999
     out_dtype = gdal.GDT_Float32 if src_dtype == gdal.GDT_Float64 else src_dtype
 
     # 7. Execute the warp
-    if callback is None:
-        def callback(complete, msg, _):
-            print(f"\r  {int(complete*100)}%", end='', flush=True)
-            return 1
+    # multithread=True disables the per-pixel callback (not thread-safe in GDAL)
+    if multithread:
+        gdal_callback = None
+        print("  Warping (multithreaded) …")
+    else:
+        if callback is None:
+            def callback(complete, msg, _):
+                print(f"\r  {int(complete*100)}%", end='', flush=True)
+                return 1
+        gdal_callback = callback
 
     ds = gdal.Warp(
         str(output_tif),
@@ -167,10 +181,10 @@ def warp_to_4326_auto(input_tiles, output_tif, resample="bilinear", nodata=-9999
         yRes=deg_per_pixel_y,
         resampleAlg=resample,
         outputType=out_dtype,
-        multithread=False,         # keep callback working
+        multithread=multithread,
         dstNodata=nodata,
         creationOptions=creation_opts,
-        callback=callback
+        callback=gdal_callback,
     )
     ds = None
     print("\nDone!")
@@ -205,18 +219,6 @@ def process_tiles(AREA):
         dtm_pipeline_json = make_dtm_pipeline(str(ground_file), str(dtm_out))
         pdal.Pipeline(dtm_pipeline_json).execute()
 
-    dtm_tiles = sorted(DTM_DIR.glob("*.tif"))
-    output_path = INPUT_DIR / "merged_dtm.tif"
-    if output_path.exists():
-        if VERBOSE > 0:
-            print(f"Skipping merge – {output_path.name} already exists")
-    else:
-        if VERBOSE > 0:
-            print(f"Merging {len(dtm_tiles)} DTM tiles into {output_path.name} …")
-        warp_to_4326_auto(dtm_tiles, output_path, callback=warp_progress)
-        if VERBOSE > 0:
-            print(f"Done! Output: {output_path.name}")
-
 def merge_dtms():
     base = Path("loaded_tiles")
     dtm_tiles = []
@@ -236,13 +238,13 @@ def merge_dtms():
 
 
 if __name__ == "__main__":
-    merge_dtms()
-    '''
+    
     freeze_support()
-    areas = [f"Circleville_Road_{i}" for i in range(4, 10)]
-    with ProcessPoolExecutor(max_workers=3) as executor:
+    areas = [f"Hopewell_Road_{i}" for i in range(1, 11)] + [f"Circleville_Road_{i}" for i in range(0, 10)]
+    with ProcessPoolExecutor(max_workers=5) as executor:
         futures = [executor.submit(process_tiles, name) for name in areas]
         for future in as_completed(futures):
             future.result()
+    merge_dtms()
 
-    '''
+    

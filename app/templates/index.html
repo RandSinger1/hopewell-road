@@ -31,6 +31,7 @@
         <button class="btn" onclick="applyFolder()">Load</button>
       </div>
       <div class="status" id="lines-status"></div>
+      <div class="status" id="osm-status"></div>
     </div>
 
     <div class="section" id="section-dtm">
@@ -112,12 +113,17 @@
       </div>
       <div class="legend-row">
         <span class="legend-line newark-chilli"></span>
-        <span>Newark → Chillicothe</span>
+        <span>Proposed route waypoints</span>
       </div>
       <div class="legend-row">
         <span class="legend-line newark-circleville"></span>
         <span>Newark → Circleville (arch)</span>
       </div>
+    </div>
+
+    <div class="section" id="error-panel" style="display:none">
+      <div class="section-label" style="color:#c0604a">Errors</div>
+      <div id="error-list"></div>
     </div>
 
   </aside>

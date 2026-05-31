@@ -6,8 +6,12 @@ import logging
 import math
 import os
 import pickle
+import sys
 import numpy as np
 from PIL import Image
+
+sys.path.insert(0, os.path.normpath(os.path.join(os.path.dirname(__file__), "..")))
+import params
 
 _log = logging.getLogger(__name__)
 
@@ -26,13 +30,13 @@ except ImportError:
     _HAS_RASTERIO = False
 
 
-TILE_SIZE = 256
+TILE_SIZE = params.TILE_SIZE_PX
 _CACHE_DIR = os.path.join(os.path.dirname(__file__), ".dtm_cache")
 
 
 # Bump whenever rendering parameters (colors, hillshade, etc.) change,
 # so cached tiles are automatically invalidated.
-RENDER_VER = "v3"
+RENDER_VER = "v4"
 
 # ---------------------------------------------------------------------------
 # Cache key
@@ -120,8 +124,8 @@ def _seg_dist_m(px: float, py: float,
                      ((py - ay) * _LAT_M          - t * dy) ** 2)
 
 
-_LAT_M        = 111_000.0
-_LON_M_APPROX =  85_000.0   # cos(40°) × 111 km
+_LAT_M        = params.METERS_PER_DEGREE_LAT
+_LON_M_APPROX = params.METERS_PER_DEGREE_LON_AT_40N
 
 
 def iter_corridor_tiles(z: int,
@@ -416,13 +420,11 @@ def _array_to_png(elev: np.ndarray, nodata_val,
 
     elev_filled = _fill_nodata(elev, mask)
     hs  = _hillshade(elev_filled, mask, cell_m=cell_m)
-    rgb = _terrain_rgb(elev_filled, mask, *elev_range)
 
-    # Min factor 0.35 keeps shadowed areas clearly visible
-    factor  = 0.35 + 0.65 * hs[:, :, np.newaxis]
-    blended = np.clip(rgb * factor, 0, 255).astype(np.uint8)
-    alpha   = np.where(mask, 0, 255).astype(np.uint8)
-    rgba    = np.dstack([blended, alpha])
+    # Pure grayscale hillshade — floor at 8 so shadows stay readable
+    gray  = np.clip(8 + hs * 247, 0, 255).astype(np.uint8)
+    alpha = np.where(mask, 0, 255).astype(np.uint8)
+    rgba  = np.dstack([gray, gray, gray, alpha])
 
     img = Image.fromarray(rgba, "RGBA")
     buf = io.BytesIO()
@@ -438,13 +440,16 @@ def _fill_nodata(elev: np.ndarray, mask: np.ndarray) -> np.ndarray:
 
 
 def _hillshade(elev: np.ndarray, mask: np.ndarray,
-               azimuth: float = 315.0, altitude: float = 45.0,
-               cell_m: float = 10.0, z_factor: float = 2.0) -> np.ndarray:
-    # Gradient in elevation-units per metre (cell_m converts pixels → metres)
-    dy, dx = np.gradient(elev / (cell_m * z_factor))
+               azimuth: float = params.HILLSHADE_AZIMUTH,
+               altitude: float = params.HILLSHADE_ALTITUDE,
+               cell_m: float = 10.0,
+               z_factor: float = params.HILLSHADE_Z_FACTOR) -> np.ndarray:
+    # Standard GIS hillshade: slope = arctan(z_factor * |∇elev / cell_m|)
+    # z_factor > 1 exaggerates vertical relief; cell_m converts pixels → metres.
+    dy, dx = np.gradient(elev / cell_m)
     az_rad  = np.radians(360.0 - azimuth + 90.0)
     alt_rad = np.radians(altitude)
-    slope   = np.arctan(np.sqrt(dx**2 + dy**2))
+    slope   = np.arctan(z_factor * np.sqrt(dx**2 + dy**2))
     aspect  = np.arctan2(-dy, dx)
     hs = (np.sin(alt_rad) * np.cos(slope)
           + np.cos(alt_rad) * np.sin(slope) * np.cos(az_rad - aspect))
@@ -482,7 +487,7 @@ def _terrain_rgb(elev: np.ndarray, mask: np.ndarray,
 # Low-res read helper (used only for elevation range stats)
 # ---------------------------------------------------------------------------
 
-MAX_DIM = 3000
+MAX_DIM = params.DTM_MAX_READ_DIM
 
 
 def _read(path: str, max_dim: int):

@@ -18,6 +18,8 @@ from flask import Flask, jsonify, render_template, request, send_file
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
+import params
+
 log = logging.getLogger(__name__)
 
 app = Flask(__name__)
@@ -28,6 +30,11 @@ state = {
     "lines": [],
     "dtm_bounds": None,
     "dtm_elev_range": None,
+    # OSM road-detection progress
+    "osm_status": "idle",        # idle | pending | done | failed
+    "osm_road_count": 0,
+    # Recent non-fatal errors surfaced to the UI
+    "load_errors": [],           # list of str, capped at 20
 }
 
 
@@ -79,6 +86,17 @@ def set_config():
     })
 
 
+@app.route("/api/status")
+def get_status():
+    return jsonify({
+        "lines_loaded":    len(state["lines"]),
+        "osm_status":      state["osm_status"],
+        "osm_road_count":  state["osm_road_count"],
+        "dtm_loaded":      state["dtm_bounds"] is not None,
+        "errors":          state["load_errors"][-20:],
+    })
+
+
 @app.route("/api/lines")
 def get_lines():
     zoom       = int(request.args.get("zoom", 12))
@@ -122,7 +140,7 @@ def prewarm_priority():
     def _worker(snap):
         from dtm_renderer import render_tile, iter_corridor_tiles
         # Progressively finer zoom with shrinking buffers
-        zoom_levels = [(13, 4.0), (14, 3.0), (15, 2.0), (16, 1.5)]
+        zoom_levels = params.PREWARM_ZOOM_SCHEDULE
         total = 0
         for zoom, default_buf in zoom_levels:
             specs = [(c[0], c[1], c[2], c[3],
@@ -211,11 +229,23 @@ def available_folders():
 
 
 # ---------------------------------------------------------------------------
+# Error tracking
+# ---------------------------------------------------------------------------
+
+def _push_error(msg: str) -> None:
+    """Append a non-fatal error to state, capped at 20 entries."""
+    log.warning(msg)
+    state["load_errors"].append(msg)
+    if len(state["load_errors"]) > 20:
+        state["load_errors"].pop(0)
+
+
+# ---------------------------------------------------------------------------
 # OSM-based road detection
 # ---------------------------------------------------------------------------
 
-_LAT_M = 111_000.0   # metres per degree latitude
-_LON_M =  85_000.0   # metres per degree longitude at ~40 °N
+_LAT_M = params.METERS_PER_DEGREE_LAT
+_LON_M = params.METERS_PER_DEGREE_LON_AT_40N
 
 _OSM_CACHE = PROJECT_ROOT / ".osm_roads_cache.json"
 
@@ -235,7 +265,7 @@ def _load_osm_cache(south, west, north, east):
             c = json.load(f)
         cs, cw, cn, ce = c["bbox"]
         if cs <= south and cw <= west and cn >= north and ce >= east:
-            if time.time() - c["ts"] < 86_400:
+            if time.time() - c["ts"] < params.OSM_CACHE_TTL_S:
                 segs = c["segs"]
                 log.info("OSM cache hit: %d road segments (%.1f h old)",
                          len(segs), (time.time() - c["ts"]) / 3600)
@@ -272,9 +302,13 @@ def _fetch_osm_roads(south, west, north, east) -> list:
     try:
         req = urllib.request.Request(
             url, data=data,
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            headers={
+                "Content-Type": "application/x-www-form-urlencoded",
+                "Accept":       "application/json",
+                "User-Agent":   "KhthonLiDAR/1.0 (archaeological survey tool)",
+            },
         )
-        with urllib.request.urlopen(req, timeout=65) as resp:
+        with urllib.request.urlopen(req, timeout=params.OSM_QUERY_TIMEOUT_S) as resp:
             result = json.loads(resp.read().decode())
     except urllib.error.URLError as e:
         log.warning("Overpass API unreachable: %s — road filtering disabled", e)
@@ -309,10 +343,10 @@ def _pt_seg_dist_m(px, py, ax, ay, bx, by) -> float:
                      ((py - ay - t * (by - ay)) * _LAT_M) ** 2)
 
 
-def _mark_osm_road_lines(lines: list, segs: list, threshold_m: float = 20.0) -> int:
+def _mark_osm_road_lines(lines: list, segs: list, threshold_m: float = params.OSM_ROAD_THRESHOLD_M) -> int:
     if not segs:
         return 0
-    buf = threshold_m / 85_000  # degree buffer for fast bbox pre-check
+    buf = threshold_m / params.METERS_PER_DEGREE_LON_AT_40N
     marked = 0
     for ln in lines:
         mx = (ln["xs"] + ln["xe"]) / 2
@@ -333,6 +367,9 @@ def _mark_osm_road_lines(lines: list, segs: list, threshold_m: float = 20.0) -> 
 # ---------------------------------------------------------------------------
 
 def _load_lines(folder: str) -> list:
+    state["osm_status"] = "idle"
+    state["osm_road_count"] = 0
+
     lines = []
     pattern = os.path.join(folder, "**", "line_overlay.json")
     for json_path in glob.glob(pattern, recursive=True):
@@ -362,7 +399,7 @@ def _load_lines(folder: str) -> list:
                     if ln is not None:
                         lines.append(ln)
         except Exception as e:
-            log.warning("%s: %s", json_path, e)
+            _push_error(f"Failed to load {os.path.basename(json_path)}: {e}")
 
     log.info("loaded %d lines from %s — OSM road detection starting in background", len(lines), folder)
 
@@ -372,18 +409,30 @@ def _load_lines(folder: str) -> list:
     if lines:
         all_lons = [(ln["xs"] + ln["xe"]) / 2 for ln in lines]
         all_lats = [(ln["ys"] + ln["ye"]) / 2 for ln in lines]
-        margin = 0.02
+        margin = params.OSM_BBOX_MARGIN_DEG
         south = min(all_lats) - margin
         west  = min(all_lons) - margin
         north = max(all_lats) + margin
         east  = max(all_lons) + margin
 
         def _osm_worker(lines_ref, south, west, north, east):
-            segs   = _fetch_osm_roads(south, west, north, east)
-            road_n = _mark_osm_road_lines(lines_ref, segs)
-            log.info("OSM road detection done: %d/%d lines flagged as road",
-                     road_n, len(lines_ref))
+            try:
+                segs = _fetch_osm_roads(south, west, north, east)
+                if not segs:
+                    state["osm_status"] = "failed"
+                    _push_error("OSM: no road segments returned (Overpass unreachable or empty bbox)")
+                    return
+                road_n = _mark_osm_road_lines(lines_ref, segs)
+                state["osm_road_count"] = road_n
+                state["osm_status"] = "done"
+                log.info("OSM road detection done: %d/%d lines flagged as road",
+                         road_n, len(lines_ref))
+            except Exception as exc:
+                state["osm_status"] = "failed"
+                _push_error(f"OSM worker error: {exc}")
+                log.exception("OSM worker failed")
 
+        state["osm_status"] = "pending"
         threading.Thread(
             target=_osm_worker, args=(lines, south, west, north, east), daemon=True
         ).start()
@@ -483,7 +532,7 @@ def main():
     parser = argparse.ArgumentParser(description="KhthonLiDAR Map Viewer")
     parser.add_argument("--folder", default="", help="Locations subfolder (e.g. locations/600_600)")
     parser.add_argument("--dtm", default="", help="Path to merged DTM GeoTIFF")
-    parser.add_argument("--port", type=int, default=5000)
+    parser.add_argument("--port", type=int, default=params.SERVER_PORT)
     args = parser.parse_args()
 
     if args.folder:
@@ -499,7 +548,7 @@ def main():
     log.info("Starting on http://127.0.0.1:%d", args.port)
     try:
         from waitress import serve
-        serve(app, host="127.0.0.1", port=args.port, threads=8)
+        serve(app, host="127.0.0.1", port=args.port, threads=params.SERVER_THREADS)
     except ImportError:
         log.warning("waitress not installed, falling back to Flask dev server")
         app.run(debug=False, port=args.port, threaded=True)

@@ -4,13 +4,13 @@ from pathlib import Path
 import numpy as np
 import cv2
 from scipy.ndimage import gaussian_filter, map_coordinates
-from skimage.morphology import remove_small_objects,  medial_axis, disk
-from skimage.morphology.binary import binary_closing
+from skimage.morphology import remove_small_objects, medial_axis, disk, closing
 from skimage.measure import label as label_function, regionprops
 from sklearn.linear_model import RANSACRegressor
 import matplotlib.pyplot as plt
 from utils import convert_meters_degrees_pixels, METERS, PIXELS, DEGREES
-from process_dtm import displayWindow, getGTAndBand, get_window, filter_image
+from process_dtm import displayWindow, getGTAndBand, get_window, median_smooth_windowed, local_relief_model, multiscale_ridge_enhancement
+import params
 
 def hessian_ridge_orientation(image, sigma=1.0):
     """Return ridge orientation (radians, [0, π)) from Hessian."""
@@ -29,12 +29,13 @@ def detect_parallel_walls_ridge_pairing(
     ridge_map,
     target_angle,               # degrees CCW from +x, 0 = horizontal
     extent,                     # [xmin, xmax, ymin, ymax] in meters
-    spacing_meters=40,          # expected wall‑to‑wall distance
-    angle_tolerance=10.0,       # ± degrees
-    spacing_tolerance=0.15,     # relative, e.g. 0.15 = ±15%
-    ridge_threshold=0.1,
-    min_ridge_length_meters=50,
-    overlap_ratio=0.3,
+    spacing_meters,          # expected wall‑to‑wall distance
+    angle_tolerance,       # ± degrees
+    spacing_tolerance,     # relative, e.g. 0.15 = ±15%
+    ridge_threshold,
+    min_ridge_length_meters,
+    overlap_ratio,
+    orientation_source=None,    # DTM to use for orientation; defaults to ridge_map
     return_debug=False,
 ):
     """
@@ -59,7 +60,8 @@ def detect_parallel_walls_ridge_pairing(
     min_ridge_length_px = convert_meters_degrees_pixels(METERS, PIXELS, min_ridge_length_meters, 0, ridge_map, extent)[0]
 
     # ---------- 1. Orientation mask ----------
-    orient_rad = hessian_ridge_orientation(ridge_map, sigma=2.0)
+    orient_source = orientation_source if orientation_source is not None else ridge_map
+    orient_rad = hessian_ridge_orientation(orient_source, sigma=params.HESSIAN_SIGMA)
     target_rad = np.deg2rad(target_angle)
     angle_diff = np.abs(orient_rad - target_rad)
     angle_diff = np.minimum(angle_diff, np.pi - angle_diff)  # modulo π
@@ -72,10 +74,15 @@ def detect_parallel_walls_ridge_pairing(
 
     # ---------- 2. Threshold & create binary mask ----------
     binary = (ridge_map > ridge_threshold) & orientation_mask
-    binary = remove_small_objects(binary, max_size=800, connectivity=10)
+    # Use `max_size` to match the newer skimage API (avoid FutureWarning).
+    # The previous `min_size` behaviour removed objects smaller than `min_size`.
+    # The new `max_size` removes objects smaller than or equal to the value,
+    # so subtract 1 to preserve the original semantics.
+    binary = remove_small_objects(binary, max_size=params.BINARY_MIN_OBJECT_SIZE - 1, connectivity=2)
 
     # ---------- 3. Robust skeletonization (works for all angles) ----------
-    binary_closed = binary_closing(binary, footprint=disk(1.5))
+    # `binary_closing` moved; use `closing` from skimage.morphology instead
+    binary_closed = closing(binary, footprint=disk(params.MORPH_DISK_RADIUS))
     skeleton = medial_axis(binary_closed, return_distance=False)
 
     # ---------- 4. Fit a straight line to each connected component ----------
@@ -126,7 +133,7 @@ def detect_parallel_walls_ridge_pairing(
             # Angle difference (mod π)
             dot = np.clip(np.dot(dir1, dir2), -1.0, 1.0)
             angle_diff_rad = np.arccos(np.abs(dot))
-            if angle_diff_rad > np.deg2rad(2):   # within 2°
+            if angle_diff_rad > np.deg2rad(params.PAIRING_ANGLE_TOLERANCE_DEG):
                 continue
 
             # Perpendicular distance
@@ -137,7 +144,7 @@ def detect_parallel_walls_ridge_pairing(
             # Overlap along average direction
             avg_dir = (dir1 + dir2) / np.linalg.norm(dir1 + dir2)
             t1_vals = [np.dot(np.array(p) - mid1, avg_dir) for p in l1]
-            t2_vals = [np.dot(np.array(p) - mid2, avg_dir) for p in l2]
+            t2_vals = [np.dot(np.array(p) - mid1, avg_dir) for p in l2]
             t1_min, t1_max = min(t1_vals), max(t1_vals)
             t2_min, t2_max = min(t2_vals), max(t2_vals)
             overlap = max(0.0, min(t1_max, t2_max) - max(t1_min, t2_min))
@@ -166,7 +173,7 @@ def detect_parallel_walls_ridge_pairing(
     pairs.sort(key=lambda x: x['score'], reverse=True)
 
     if return_debug:
-        return pairs, (binary, skeleton, orientation_mask)
+        return pairs, (binary, binary_closed, skeleton, labeled, orientation_mask)
     return pairs
 
 
@@ -232,9 +239,10 @@ def remove_invalid_pairs(
             diff = abs(a - b) % 180
             return min(diff, 180 - diff)
 
-        if angle_difference(angle1, target_angle) > angle_tolerance:
+        along_wall_angle = (target_angle + 90) % 180  # TARGET_ANGLE is cross-ridge; fitLine is along-ridge
+        if angle_difference(angle1, along_wall_angle) > angle_tolerance:
             continue
-        if angle_difference(angle2, target_angle) > angle_tolerance:
+        if angle_difference(angle2, along_wall_angle) > angle_tolerance:
             continue
 
         # --- 5. Compute spacing (perpendicular distance between lines) ---
@@ -264,34 +272,31 @@ def search_region(filepath: str, coordinates: tuple[float, float], size_x_meters
         return
     window_original = window.copy()
     window_original = np.where(window_original == nodata, np.nan, window_original)
-    target_angle = 125
-    angle_tolerance = 15
+    target_angle = params.TARGET_ANGLE
+    angle_tolerance = params.ANGLE_TOLERANCE
     if verbose > 0: print(f"Filtering DTM with median smoothing")
-    window, extent, cmap, label = filter_image(
-        window,
-        extent,
-        ridge=True,
-        ridge_scales=[6],#[4, 6, 8],
-        nodata=nodata,
-        median_smoothing=True,
-    )
-    if verbose > 0: print("Detecting parallel walls using templWate matching …")
+    smoothed = median_smooth_windowed(window, nodata=nodata)
+    lrm = local_relief_model(smoothed, nodata=nodata)
+    ridge_map = multiscale_ridge_enhancement(lrm, scales=params.SCAN_RIDGE_SCALES, nodata=nodata)
+    nd_mask = window == nodata
+    ridge_map = np.where(nd_mask, 0.0, ridge_map.astype(float))
+    if verbose > 0: print("Detecting parallel walls …")
     pairs = detect_parallel_walls_ridge_pairing(
-        ridge_map=window,
-        target_angle=target_angle,  # degrees
+        ridge_map=ridge_map,
+        target_angle=target_angle,
         extent=extent,
-        spacing_meters=40,         # Meters
+        spacing_meters=params.SPACING_METERS,
         angle_tolerance=angle_tolerance,
-        spacing_tolerance=.2,
-        ridge_threshold=.1,
-        min_ridge_length_meters=50,
-        overlap_ratio=0.3,
+        spacing_tolerance=params.SPACING_TOLERANCE,
+        ridge_threshold=params.RIDGE_THRESHOLD,
+        min_ridge_length_meters=params.MIN_RIDGE_LENGTH_METERS,
+        overlap_ratio=params.OVERLAP_RATIO,
+        # orientation_source=lrm,
         return_debug=False,
     )
     if verbose > 0: print(f"Found {len(pairs)} parallel wall pairs.")
-    
 
-    pairs = remove_invalid_pairs(pairs, angle_tolerance = angle_tolerance, target_angle = target_angle)
+    pairs = remove_invalid_pairs(pairs, angle_tolerance=angle_tolerance, target_angle=target_angle)
 
     if len(pairs) > 0: 
         displayWindow(

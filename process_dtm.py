@@ -14,6 +14,7 @@ from scipy.signal import convolve2d
 from xrspatial import sky_view_factor
 from utils import meters_to_degrees, create_parallel_ridge_kernel_compact
 import xarray as xr
+import params
 
 
 def get_window(lat, lon, size_x_meters, size_y_meters, gt, band, nodata):
@@ -47,11 +48,11 @@ def getGTAndBand(filepath):
     return gt, band, nodata, ds
 
 
-def filter_image(window, extent, nodata=-9999, contours=False, gaussian_smoothing=False,
-                  median_smoothing=False, lrm=False, lrm_radius=10,
-                  svf=False, svf_radius=10, svf_directions=16,
-                  ridge=False, ridge_scales=[1, 2, 3],
-                  smoothing_radius=10, smoothing_sigma=1.0, title=None):
+def filter_image(window, extent, nodata=params.NODATA, contours=False, gaussian_smoothing=False,
+                  median_smoothing=False, lrm=False, lrm_radius=params.LRM_RADIUS,
+                  svf=False, svf_radius=params.SVF_RADIUS, svf_directions=params.SVF_DIRECTIONS,
+                  ridge=False, ridge_scales=None,
+                  smoothing_radius=params.MEDIAN_SMOOTH_RADIUS, smoothing_sigma=1.0, title=None):
     """
     Display a LiDAR window with optional archaeological pre-processing.
 
@@ -88,6 +89,9 @@ def filter_image(window, extent, nodata=-9999, contours=False, gaussian_smoothin
     smoothing_sigma : float
         Sigma for Gaussian kernel.
     """
+    if ridge_scales is None:
+        ridge_scales = params.RIDGE_SCALES
+
     if gaussian_smoothing:
         window = gaussian_smooth_windowed(window, nodata=nodata,
                                           radius=smoothing_radius,
@@ -217,7 +221,7 @@ def displayWindow(window, extent, cmap, label=None, contours=False, lines=None,
 # Raster processing helpers
 # ----------------------------------------------------------------------
 
-def gaussian_smooth_windowed(data, nodata=-9999, radius=10, sigma=1.0):
+def gaussian_smooth_windowed(data, nodata=params.NODATA, radius=params.MEDIAN_SMOOTH_RADIUS, sigma=1.0):
     """Smooth a raster while ignoring nodata values."""
     mask = data == nodata
     valid = np.where(mask, 0, data)
@@ -229,7 +233,7 @@ def gaussian_smooth_windowed(data, nodata=-9999, radius=10, sigma=1.0):
     return result
 
 
-def median_smooth_windowed(data, nodata=-9999, radius=10):
+def median_smooth_windowed(data, nodata=params.NODATA, radius=params.MEDIAN_SMOOTH_RADIUS):
     """Median filter a raster while ignoring nodata values."""
     mask = data == nodata
     arr = data.astype(float)
@@ -243,7 +247,7 @@ def median_smooth_windowed(data, nodata=-9999, radius=10):
     return result
 
 
-def local_relief_model(data, radius=10, nodata=-9999):
+def local_relief_model(data, radius=params.LRM_RADIUS, nodata=params.NODATA):
     """
     Local Relief Model: subtract a large-scale mean surface.
     Uses a square box filter of radius `radius` cells, masking nodata.
@@ -261,19 +265,21 @@ def local_relief_model(data, radius=10, nodata=-9999):
     return lrm
 
 
-def sky_view_factor_xr(window, radius=10, directions=16, nodata=-9999):
+def sky_view_factor_xr(window, radius=params.SVF_RADIUS, directions=params.SVF_DIRECTIONS, nodata=params.NODATA):
     da = xr.DataArray(window, dims=["y", "x"])
     da = da.where(da != nodata)
     svf = sky_view_factor(agg=da, max_radius=radius, n_directions=directions)
     return svf.values
 
 
-def multiscale_ridge_enhancement(data, scales=[1, 2, 3], nodata=-9999):
+def multiscale_ridge_enhancement(data, scales=None, nodata=params.NODATA):
     """
     Multi-scale ridge enhancement using the Frangi vesselness measure.
     Returns the maximum ridge response across the given scales.
     Nodata pixels are filled with the median before processing and restored after.
     """
+    if scales is None:
+        scales = params.RIDGE_SCALES
     mask = data == nodata
     fill_val = np.nanmedian(np.where(mask, np.nan, data))
     working = np.where(mask, fill_val, data.astype(np.float64))
@@ -293,14 +299,15 @@ def multiscale_ridge_enhancement(data, scales=[1, 2, 3], nodata=-9999):
         λ2 = (Dxx + Dyy + disc) / 2   # larger eigenvalue
 
         S = np.sqrt(λ1 ** 2 + λ2 ** 2)
-        c_val = np.where(S > 0, 0.5 * S, 1.0)  # per-pixel, matches original logic
+        s_pos = S[S > 0]
+        c_val = 0.5 * np.percentile(s_pos, 95) if s_pos.size > 0 else 1.0
 
         with np.errstate(divide='ignore', invalid='ignore'):
             Rb = np.where(λ1 != 0, λ2 / λ1, 0.0)
 
         ridge_scale = np.where(
             λ1 < 0,
-            (1 - np.exp(-Rb ** 2 / (2 * beta ** 2))) *
+            np.exp(-Rb ** 2 / (2 * beta ** 2)) *
             (1 - np.exp(-S ** 2 / (2 * c_val ** 2))),
             0.0
         )

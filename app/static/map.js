@@ -7,6 +7,8 @@ let NEWARK      = [40.0,-82.4];
 let CHILLICOTHE = [39.3, -82.9];
 let CIRCLEVILLE = [39.6, -82.9];
 
+let ROUTE_WAYPOINTS = [];   // loaded from /static/coords.json
+
 // ---------------------------------------------------------------------------
 // Map & layer state
 // ---------------------------------------------------------------------------
@@ -28,6 +30,7 @@ document.addEventListener("DOMContentLoaded", () => {
   _fetchInitialConfig();
   _populateFolderDropdown();
   _populateSiteInputs();
+  _loadRouteWaypoints();
 });
 
 function _initMap() {
@@ -78,6 +81,7 @@ function _fetchInitialConfig() {
         document.getElementById("folder-input").value = cfg.locations_folder;
         _setStatus("lines", `${cfg.lines_loaded} lines loaded`);
         _scheduleLineLoad();
+        _startStatusPoll();
       }
       if (cfg.dtm_path) {
         document.getElementById("dtm-input").value = cfg.dtm_path;
@@ -127,6 +131,7 @@ function applyFolder() {
     .then(data => {
       _setStatus("lines", `${data.lines_loaded} lines loaded`);
       _scheduleLineLoad();
+      _startStatusPoll();
     })
     .catch(e => _setStatus("lines", "Error: " + e.message));
 }
@@ -384,6 +389,19 @@ function applySites() {
 }
 
 // ---------------------------------------------------------------------------
+// Route waypoints (coords.json)
+// ---------------------------------------------------------------------------
+function _loadRouteWaypoints() {
+  fetch("/static/coords.json")
+    .then(r => r.json())
+    .then(pts => {
+      ROUTE_WAYPOINTS = pts;
+      _drawReferenceLines();
+    })
+    .catch(console.error);
+}
+
+// ---------------------------------------------------------------------------
 // Reference lines
 // ---------------------------------------------------------------------------
 function _drawReferenceLines() {
@@ -391,10 +409,30 @@ function _drawReferenceLines() {
 
   const dashOpts = { weight: 1.5, opacity: 0.9, dashArray: "10 7" };
 
-  // Straight line: Newark → Chillicothe
-  L.polyline([NEWARK, CHILLICOTHE], {
-    ...dashOpts, color: "#44aaff",
-  }).addTo(refLayer);
+  if (ROUTE_WAYPOINTS.length >= 2) {
+    // Polyline through the coords.json waypoints
+    const latLngs = ROUTE_WAYPOINTS.map(p => [p.lat, p.lon]);
+    L.polyline(latLngs, { ...dashOpts, color: "#44aaff" }).addTo(refLayer);
+
+    // Named marker at each waypoint
+    ROUTE_WAYPOINTS.forEach(p => {
+      L.circleMarker([p.lat, p.lon], {
+        radius: 5,
+        color: "#44aaff",
+        fillColor: "#1a3a5c",
+        fillOpacity: 0.9,
+        weight: 1.5,
+      })
+        .bindTooltip(
+          `<b>${p.name}</b>${p.note ? "<br><span style='color:#aaa'>" + p.note + "</span>" : ""}`,
+          { sticky: true, className: "wp-tooltip" }
+        )
+        .addTo(refLayer);
+    });
+  } else {
+    // Fallback if waypoints haven't loaded yet
+    L.polyline([NEWARK, CHILLICOTHE], { ...dashOpts, color: "#44aaff" }).addTo(refLayer);
+  }
 
   // Arch: Newark → Circleville (quadratic Bézier curving northward)
   L.polyline(_bezierArch(NEWARK, CIRCLEVILLE, 0.35), {
@@ -521,4 +559,50 @@ function _addKeyboardShortcuts() {
 function _setStatus(key, msg) {
   const el = document.getElementById(`${key}-status`);
   if (el) el.textContent = msg;
+}
+
+// ---------------------------------------------------------------------------
+// Server status polling (OSM road detection + error reporting)
+// ---------------------------------------------------------------------------
+let _statusPollTimer = null;
+
+function _startStatusPoll() {
+  clearTimeout(_statusPollTimer);
+  _pollStatus();
+}
+
+function _pollStatus() {
+  fetch("/api/status")
+    .then(r => r.json())
+    .then(s => {
+      _renderOsmStatus(s.osm_status, s.osm_road_count);
+      _renderErrors(s.errors || []);
+      // Keep polling while detection is in progress
+      if (s.osm_status === "pending") {
+        _statusPollTimer = setTimeout(_pollStatus, 2500);
+      }
+    })
+    .catch(() => {});
+}
+
+function _renderOsmStatus(status, roadCount) {
+  const el = document.getElementById("osm-status");
+  if (!el) return;
+  el.className = "status " + status;
+  if (status === "idle")    { el.textContent = ""; }
+  if (status === "pending") { el.textContent = "⟳ Detecting roads via OSM…"; }
+  if (status === "done")    { el.textContent = `✓ ${roadCount} road segment${roadCount !== 1 ? "s" : ""} matched`; }
+  if (status === "failed")  { el.textContent = "✗ OSM road detection failed — check errors"; }
+}
+
+function _renderErrors(errors) {
+  const panel = document.getElementById("error-panel");
+  const list  = document.getElementById("error-list");
+  if (!panel || !list) return;
+  if (!errors.length) {
+    panel.style.display = "none";
+    return;
+  }
+  panel.style.display = "";
+  list.innerHTML = errors.map(e => `<div>${e}</div>`).join("");
 }

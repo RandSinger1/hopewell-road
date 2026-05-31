@@ -1,8 +1,11 @@
 import json
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import laspy
 import numpy as np
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 from io import BytesIO
 from urllib.parse import urlparse
 from pathlib import Path
@@ -46,24 +49,61 @@ def open_image_source(path):
     return laz_data
 
 
+def _make_session():
+    session = requests.Session()
+    retry = Retry(total=5, backoff_factor=2, status_forcelist=[429, 500, 502, 503, 504])
+    session.mount("https://", HTTPAdapter(max_retries=retry))
+    session.mount("http://",  HTTPAdapter(max_retries=retry))
+    return session
+
+
 def download_and_cache(tile_url, local_path):
-    resp = requests.get(tile_url, timeout=60)
+    session = _make_session()
+    resp = session.get(tile_url, timeout=120)
     resp.raise_for_status()
     with open(local_path, 'wb') as f:
         f.write(resp.content)
 
 
-def generate_tiles(tiles, area):
+def _download_one(args):
+    idx, url, local_file = args
+    if local_file.exists():
+        return idx, url, None
+    try:
+        download_and_cache(url, local_file)
+        return idx, url, None
+    except Exception as e:
+        return idx, url, str(e)
+
+
+def generate_tiles(tiles, area, max_workers=4):
     output_dir = Path(f'loaded_tiles/{area}/raw_tiles')
     output_dir.mkdir(parents=True, exist_ok=True)
+    failed_log = Path(f'loaded_tiles/{area}/failed_downloads.txt')
 
-    for idx, t in enumerate(tiles):
-        local_file = output_dir / f'tile_{idx}.laz'
-        if not local_file.exists():
-            try:
-                download_and_cache(t, local_file)
-            except Exception as e:
-                print(f"Error downloading tile {idx}: {e}")
+    work = [(idx, url, output_dir / f'tile_{idx}.laz') for idx, url in enumerate(tiles)]
+    total = len(work)
+    done = 0
+    failures = []
+
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        futures = {pool.submit(_download_one, item): item[0] for item in work}
+        for future in as_completed(futures):
+            idx, url, err = future.result()
+            done += 1
+            if err:
+                print(f"[{done}/{total}] tile {idx} error: {err}")
+                failures.append((idx, url, err))
+            else:
+                print(f"[{done}/{total}] tile {idx} done")
+
+    if failures:
+        with open(failed_log, 'w') as f:
+            for idx, url, err in sorted(failures):
+                f.write(f"tile_{idx}\t{url}\t{err}\n")
+        print(f"{len(failures)} failed download(s) logged to {failed_log}")
+    elif failed_log.exists():
+        failed_log.unlink()  # clean up old log if everything succeeded this run
 
 
 def main():

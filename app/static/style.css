@@ -290,6 +290,35 @@ input.coord-input:focus { border-color: var(--accent); }
   text-decoration: line-through;
 }
 
+/* ── OSM status states ─────────────────────────────────────────── */
+.status.pending { color: #a0b060; }
+.status.done    { color: #5aaa70; }
+.status.failed  { color: #c07050; }
+
+/* ── Error panel ───────────────────────────────────────────────── */
+#error-list {
+  font-size: 11px;
+  color: #c07060;
+  line-height: 1.5;
+}
+#error-list div {
+  padding: 2px 0;
+  border-bottom: 1px solid #1e2d30;
+  word-break: break-word;
+}
+
+/* ── Waypoint tooltips ─────────────────────────────────────────── */
+.wp-tooltip {
+  background: rgba(10, 20, 38, 0.92);
+  border: 1px solid #1e2d45;
+  color: #d4dce8;
+  font-size: 12px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+}
+.wp-tooltip::before { display: none; }
+
 /* ── Leaflet overrides ─────────────────────────────────────────── */
 .leaflet-control-zoom a {
   background: var(--sidebar-bg) !important;

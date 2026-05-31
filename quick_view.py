@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 quick_view_dtm.py
 
@@ -11,6 +10,8 @@ import argparse
 import numpy as np
 from osgeo import gdal
 import matplotlib.pyplot as plt
+
+import params
 
 def quick_view_dtm(input_path, sample_step=10, cmap='viridis', figsize=(12, 8), outpath = None):
     """
@@ -27,27 +28,47 @@ def quick_view_dtm(input_path, sample_step=10, cmap='viridis', figsize=(12, 8), 
     figsize : tuple
         Figure size in inches.
     """
+    print(f"[1] Opening: {input_path}")
     ds = gdal.Open(input_path)
     if ds is None:
         raise RuntimeError(f"Could not open {input_path}")
+    print(f"[1] OK — driver: {ds.GetDriver().ShortName}")
 
     band = ds.GetRasterBand(1)
     full_xsize = ds.RasterXSize
     full_ysize = ds.RasterYSize
+    print(f"[2] Full size: {full_xsize} x {full_ysize}")
+    print(f"[2] Geotransform: {ds.GetGeoTransform()}")
+    print(f"[2] CRS: {ds.GetProjection()[:80]}...")
 
     # Dimensions of the downsampled array
     buf_xsize = (full_xsize + sample_step - 1) // sample_step
     buf_ysize = (full_ysize + sample_step - 1) // sample_step
+    print(f"[3] Downsampled size: {buf_xsize} x {buf_ysize}  (step={sample_step})")
 
     # Read using positional arguments: (xoff, yoff, xsize, ysize, buf_xsize, buf_ysize)
+    print(f"[4] Reading array (this may take a moment)…")
     data = band.ReadAsArray(0, 0, full_xsize, full_ysize, buf_xsize, buf_ysize)
-    data = data.astype(np.float32)
+    print(f"[4] Read complete — dtype: {data.dtype}, shape: {data.shape}")
+    print(f"[4] Raw min: {data.min():.2f}  max: {data.max():.2f}  mean: {data.mean():.2f}")
 
     # Optional: mask NoData values (if any)
     nodata = band.GetNoDataValue()
+    print(f"[5] Nodata value: {nodata}")
     if nodata is not None:
-        data = np.ma.masked_equal(data, nodata)
-
+        data = data.astype(np.float32)
+        nodata_f32 = np.float32(nodata)
+        n_nodata = np.sum(data == nodata_f32)
+        n_valid  = data.size - n_nodata
+        print(f"[5] Nodata pixels: {n_nodata} / {data.size}  ({100*n_nodata/data.size:.1f}%)")
+        print(f"[5] Valid pixels:  {n_valid}")
+        data = np.ma.masked_equal(data, nodata_f32)
+        if data.count() == 0:
+            print("[5] WARNING: all pixels masked after nodata removal!")
+        else:
+            print(f"[5] Valid range: {data.min():.2f} – {data.max():.2f}")
+    data = data.astype(np.float32)
+    
     # Get geotransform and compute coordinate arrays for each downsampled pixel centre
     gt = ds.GetGeoTransform()
     # x coordinates: left edge + half-pixel offset for the first centre
@@ -89,9 +110,9 @@ def quick_view_dtm(input_path, sample_step=10, cmap='viridis', figsize=(12, 8), 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Quickly view a large DTM at low resolution")
-    parser.add_argument("--input", type = str, default = "loaded_tiles/Whole_Road/merged_dtm.tif",
+    parser.add_argument("--input", type = str, default = params.REPORT_DTM_PATH,
                         help="Input GeoTIFF file")
-    parser.add_argument("--step", type=int, default=100,
+    parser.add_argument("--step", type=int, default=1000,
                         help="Sampling step (every Nth pixel), default=10")
     parser.add_argument("--cmap", type=str, default="terrain",
                         help="Colormap, e.g., terrain, jet, viridis")
