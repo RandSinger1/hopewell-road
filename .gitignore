@@ -12,3 +12,4 @@ locations
 *.json
 app/.dtm_cache
 .claude
+.docx
