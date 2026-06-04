@@ -32,6 +32,7 @@ from pathlib import Path
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
+from matplotlib.colors import Normalize
 from mpl_toolkits.mplot3d import Axes3D   # noqa: F401 (registers 3D projection)
 from scipy.ndimage import map_coordinates
 from scipy.signal import find_peaks
@@ -317,16 +318,18 @@ def _road_elevation_profile(smoothed: np.ndarray, extent: list, nodata: float,
 # 6.  Per-pair perpendicular cross-sections
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _detected_pair_profiles(raw: np.ndarray, smoothed: np.ndarray,
+def _detected_pair_profiles(raw: np.ndarray, smoothed: np.ndarray, lrm: np.ndarray,
                              extent: list, nodata: float,
-                             pairs: list, name: str, output_dir: Path) -> None:
+                             pairs: list, name: str, output_dir: Path,
+                             n_cross: int = 10) -> None:
     """
-    For each detected wall pair, sample an elevation transect perpendicular
-    to the walls through the pair's centroid.  All profiles are overlaid on
-    one figure so the dual-wall W-shape can be compared across all detections.
+    Four-panel figure for the longest detected wall pair.
 
-    X-axis is distance from the pair centroid (m); walls should appear as
-    twin peaks at ±spacing/2.  A de-trended panel removes the regional slope.
+    Top row  — hillshaded DTM (unchanged) and LRM (slope-normalised) map views,
+               with detected wall lines and n_cross colour-coded transect lines
+               showing exactly where each profile is sampled.
+    Bottom row — raw elevation and de-trended profiles for all n_cross transects,
+                 colour-coded to match the map above.
     """
     if not pairs:
         return
@@ -336,115 +339,209 @@ def _detected_pair_profiles(raw: np.ndarray, smoothed: np.ndarray,
     center_lat = (ymin + ymax) / 2.0
     px_m = (xmax - xmin) / cols * 111320.0 * np.cos(np.radians(center_lat))
 
-    # Fixed sampling extent so all profiles share the same x-axis
-    half_w    = cfg.SPACING_METERS * 1.5
-    n_samp    = 200
-    max_pairs = min(len(pairs), 15)
-    cmap_p    = cm.get_cmap("plasma", max_pairs)
-    alpha     = max(0.35, 0.85 - 0.04 * max_pairs)
-
-    fig, (ax_raw, ax_dt) = plt.subplots(
-        1, 2, figsize=(16, 6), facecolor="#1a1a1a",
-        gridspec_kw={"wspace": 0.12},
-    )
-    fig.suptitle(
-        f"Detected-Pair Cross Sections  ·  {name.replace('_', ' ')}  "
-        f"·  {max_pairs} pair{'s' if max_pairs != 1 else ''} shown",
-        fontsize=12, color="white",
-    )
-
-    # All sample calls use the same n_samp and half_w, so dists arrays are
-    # identical — we can stack de-trended profiles directly.
-    profiles_dt: list = []
-
-    for i, pair in enumerate(pairs[:max_pairs]):
-        geo_segs = pair_to_geo(pair, extent, raw.shape)
-        (gx0, gy0), (gx1, gy1) = geo_segs[0]   # line1 geo endpoints (lon, lat)
-        (gx2, gy2), (gx3, gy3) = geo_segs[1]   # line2 geo endpoints
-
-        lat_c = ((gy0 + gy1) + (gy2 + gy3)) / 4.0
-        lon_c = ((gx0 + gx1) + (gx2 + gx3)) / 4.0
-
-        # Wall bearing (CW from N) from line1 geo direction
-        d_east  = (gx1 - gx0) * np.cos(np.radians(lat_c)) * 111320.0
-        d_north = (gy1 - gy0) * 111320.0
-        if abs(d_east) < 1e-9 and abs(d_north) < 1e-9:
-            continue
-        wall_bearing = np.degrees(np.arctan2(d_east, d_north)) % 180.0
-
-        # sample_profile samples perpendicular to wall_bearing
-        dists, elev = sample_profile(
-            smoothed, extent, lat_c, lon_c,
-            wall_bearing, half_w, n_samp, nodata=nodata,
+    def _pair_min_length(p):
+        l1, l2 = p['line1'], p['line2']
+        return min(
+            np.hypot(l1[1][0] - l1[0][0], l1[1][1] - l1[0][1]),
+            np.hypot(l2[1][0] - l2[0][0], l2[1][1] - l2[0][1]),
         )
 
-        valid = ~np.isnan(elev)
-        if valid.sum() < 10:
-            continue
+    pair = max(pairs, key=_pair_min_length)
+    spacing_m = pair['spacing'] * px_m
 
-        coeffs    = np.polyfit(dists[valid], elev[valid], 1)
-        detrended = elev - np.polyval(coeffs, dists)
+    geo_segs = pair_to_geo(pair, extent, raw.shape)
+    (gx0, gy0), (gx1, gy1) = geo_segs[0]
+    (gx2, gy2), (gx3, gy3) = geo_segs[1]
 
-        color     = cmap_p(i / max(1, max_pairs - 1))
-        spacing_m = pair['spacing'] * px_m
-        lbl       = f"Pair {i + 1}  ({spacing_m:.0f} m)"
+    lat_c = ((gy0 + gy1) + (gy2 + gy3)) / 4.0
+    lon_c = ((gx0 + gx1) + (gx2 + gx3)) / 4.0
+    cos_lat = np.cos(np.radians(lat_c))
 
-        ax_raw.plot(dists, elev,      color=color, linewidth=0.9, alpha=alpha, label=lbl)
-        ax_dt.plot(dists, detrended, color=color, linewidth=0.9, alpha=alpha)
-
-        # Project each line's midpoint onto the cross-section axis to get actual wall positions
-        wall_bearing_rad = np.radians(wall_bearing)
-        cos_b, sin_b = np.cos(wall_bearing_rad), np.sin(wall_bearing_rad)
-        cos_lat = np.cos(np.radians(lat_c))
-
-        def _proj(lon_pt, lat_pt):
-            d_e = (lon_pt - lon_c) * cos_lat * 111320.0
-            d_n = (lat_pt - lat_c) * 111320.0
-            return d_e * cos_b - d_n * sin_b
-
-        pos1 = _proj((gx0 + gx1) / 2, (gy0 + gy1) / 2)
-        pos2 = _proj((gx2 + gx3) / 2, (gy2 + gy3) / 2)
-
-        for ax in (ax_raw, ax_dt):
-            ax.axvline(pos1, color=color, linewidth=0.9, linestyle=":", alpha=0.60)
-            ax.axvline(pos2, color=color, linewidth=0.9, linestyle=":", alpha=0.60)
-
-        profiles_dt.append(detrended)
-
-    if not profiles_dt:
-        plt.close(fig)
+    d_east  = (gx1 - gx0) * cos_lat * 111320.0
+    d_north = (gy1 - gy0) * 111320.0
+    if abs(d_east) < 1e-9 and abs(d_north) < 1e-9:
         return
 
-    # Mean ± σ across all de-trended profiles
-    if len(profiles_dt) >= 2:
-        stack   = np.vstack(profiles_dt)
-        mean_dt = np.nanmean(stack, axis=0)
-        std_dt  = np.nanstd(stack, axis=0)
-        ax_dt.plot(dists, mean_dt, color="white", linewidth=2.0, zorder=5, label="Mean")
-        ax_dt.fill_between(dists, mean_dt - std_dt, mean_dt + std_dt,
-                           alpha=0.15, color="white", label="±1 σ")
+    wall_bearing = np.degrees(np.arctan2(d_east, d_north)) % 180.0
+    wb_rad = np.radians(wall_bearing)
+    sin_b, cos_b = np.sin(wb_rad), np.cos(wb_rad)
+    # Perpendicular to wall (bearing + 90°): used for cross-section sampling direction
+    perp_east  =  cos_b
+    perp_north = -sin_b
+
+    def _along_wall(glon, glat):
+        """Signed distance (m) from centroid along the wall axis."""
+        de = (glon - lon_c) * cos_lat * 111320.0
+        dn = (glat - lat_c) * 111320.0
+        return de * sin_b + dn * cos_b
+
+    def _perp_proj(glon, glat):
+        """Signed distance (m) from centroid along the cross-section axis."""
+        de = (glon - lon_c) * cos_lat * 111320.0
+        dn = (glat - lat_c) * 111320.0
+        return de * cos_b - dn * sin_b
+
+    # Evenly-space n_cross sample centres inside the pair's along-wall extent
+    ts_wall = [_along_wall(gx0, gy0), _along_wall(gx1, gy1),
+               _along_wall(gx2, gy2), _along_wall(gx3, gy3)]
+    t_min, t_max = min(ts_wall), max(ts_wall)
+    edge = (t_max - t_min) * 0.05
+    ts = np.linspace(t_min + edge, t_max - edge, n_cross)
+
+    cs_lats = lat_c + ts * cos_b / 111320.0
+    cs_lons = lon_c + ts * sin_b / (cos_lat * 111320.0)
+
+    half_w = cfg.SPACING_METERS * 1.5
+    n_samp = 200
+
+    pos1 = _perp_proj((gx0 + gx1) / 2.0, (gy0 + gy1) / 2.0)
+    pos2 = _perp_proj((gx2 + gx3) / 2.0, (gy2 + gy3) / 2.0)
+
+    # ── Sample profiles ────────────────────────────────────────────────────────
+    profiles_raw: list = []
+    profiles_dt: list  = []
+    valid_ts: list     = []
+    valid_lats: list   = []
+    valid_lons: list   = []
+
+    for i, (lat_s, lon_s) in enumerate(zip(cs_lats, cs_lons)):
+        dists, elev = sample_profile(
+            smoothed, extent, lat_s, lon_s,
+            wall_bearing, half_w, n_samp, nodata=nodata,
+        )
+        _, elev_lrm = sample_profile(
+            lrm, extent, lat_s, lon_s,
+            wall_bearing, half_w, n_samp, nodata=nodata,
+        )
+        v = ~np.isnan(elev)
+        if v.sum() < 10:
+            continue
+        profiles_raw.append(elev)
+        profiles_dt.append(elev_lrm)
+        valid_ts.append(ts[i])
+        valid_lats.append(lat_s)
+        valid_lons.append(lon_s)
+
+    if not profiles_raw:
+        return
+
+    n_valid  = len(profiles_raw)
+    cmap_cs  = cm.get_cmap("plasma", n_valid)
+    dists_x  = np.linspace(-half_w, half_w, n_samp)
+    alpha_ln = max(0.45, 1.0 - 0.04 * n_valid)
+
+    # ── Map imagery ────────────────────────────────────────────────────────────
+    hs_img  = render_hillshaded_dtm(raw, nodata=nodata,
+                                     azimuth=315, altitude=30, z_factor=4.0)
+    lrm_f   = np.where(lrm == nodata, np.nan, lrm.astype(float))
+    lrm_abs = np.abs(lrm_f[np.isfinite(lrm_f)])
+    lrm_vmax = float(np.nanpercentile(lrm_abs, 98)) if lrm_abs.size else 1.0
+    ext_map = (xmin, xmax, ymin, ymax)
+
+    # ── Figure ─────────────────────────────────────────────────────────────────
+    fig = plt.figure(figsize=(18, 14), facecolor="#1a1a1a")
+    fig.suptitle(
+        f"Detected-Pair Cross Sections  ·  {name.replace('_', ' ')}  "
+        f"·  {n_valid} transects  ·  {spacing_m:.0f} m wall spacing  "
+        f"·  bearing {wall_bearing:.0f}°",
+        fontsize=12, color="white", y=0.985,
+    )
+    gs = fig.add_gridspec(2, 2, hspace=0.18, wspace=0.12,
+                          top=0.955, bottom=0.07, left=0.05, right=0.92)
+
+    ax_hs  = fig.add_subplot(gs[0, 0])
+    ax_lrm = fig.add_subplot(gs[0, 1])
+    ax_raw = fig.add_subplot(gs[1, 0])
+    ax_dt  = fig.add_subplot(gs[1, 1])
+
+    # ── Map panels ─────────────────────────────────────────────────────────────
+    ax_hs.imshow(hs_img, origin="upper", extent=ext_map, aspect="auto")
+    im_lrm = ax_lrm.imshow(lrm_f, origin="upper", cmap="RdBu_r",
+                             extent=ext_map, aspect="auto",
+                             vmin=-lrm_vmax, vmax=lrm_vmax)
+    cbar_lrm = fig.colorbar(im_lrm, ax=ax_lrm, fraction=0.046, pad=0.02, shrink=0.9)
+    cbar_lrm.set_label("LRM (m)", color="lightgray", fontsize=8)
+    cbar_lrm.ax.yaxis.set_tick_params(colors="gray", labelsize=7)
+
+    WALL_COLORS = ["#ff4444", "#4499ff"]
+    for ax in (ax_hs, ax_lrm):
+        # Detected wall pair
+        for k, ((lx0, ly0), (lx1, ly1)) in enumerate(geo_segs):
+            ax.plot([lx0, lx1], [ly0, ly1], color=WALL_COLORS[k],
+                    linewidth=2.2, alpha=0.9,
+                    label=(f"Wall {k+1}" if ax is ax_hs else "_nolabel_"))
+        # Cross-section transect lines, colour-coded by along-wall position
+        for j, (lat_s, lon_s) in enumerate(zip(valid_lats, valid_lons)):
+            c_j   = cmap_cs(j / max(1, n_valid - 1))
+            lat_e = [lat_s + d * perp_north / 111320.0             for d in (-half_w, half_w)]
+            lon_e = [lon_s + d * perp_east  / (cos_lat * 111320.0) for d in (-half_w, half_w)]
+            ax.plot(lon_e, lat_e, color=c_j, linewidth=0.9, alpha=0.80)
+        ax.plot(lon_c, lat_c, "w+", markersize=9, markeredgewidth=1.5, alpha=0.85)
+
+    style_axes(ax_hs,  "DTM Hillshade  (unchanged)")
+    style_axes(ax_lrm, "Local Relief Model  (slope-normalised)")
+    for ax in (ax_hs, ax_lrm):
+        ax.set_xticks([]); ax.set_yticks([])
+    ax_hs.legend(fontsize=7, facecolor="#1e1e1e", edgecolor="#444",
+                 labelcolor="lightgray", loc="upper left")
+
+    # ── Profile panels ─────────────────────────────────────────────────────────
+    stack_raw = np.vstack(profiles_raw)
+    stack_dt  = np.vstack(profiles_dt)
+    mean_raw  = np.nanmean(stack_raw, axis=0)
+    mean_dt   = np.nanmean(stack_dt,  axis=0)
+    std_dt    = np.nanstd(stack_dt,   axis=0)
+
+    for j, (elev, detrended) in enumerate(zip(profiles_raw, profiles_dt)):
+        c_j = cmap_cs(j / max(1, n_valid - 1))
+        ax_raw.plot(dists_x, elev,      color=c_j, linewidth=0.9, alpha=alpha_ln,
+                    label=f"{valid_ts[j]:+.0f} m")
+        ax_dt.plot( dists_x, detrended, color=c_j, linewidth=0.9, alpha=alpha_ln)
+
+    ax_raw.plot(dists_x, mean_raw, color="white", linewidth=2.0, zorder=5, label="Mean")
+    ax_dt.plot( dists_x, mean_dt,  color="white", linewidth=2.0, zorder=5, label="Mean")
+    ax_dt.fill_between(dists_x, mean_dt - std_dt, mean_dt + std_dt,
+                       alpha=0.15, color="white", label="±1 σ")
 
     for ax in (ax_raw, ax_dt):
-        ax.axvline(0, color="#888888", linewidth=0.8, linestyle="--", alpha=0.7)
+        ax.axvline(pos1, color="#ff4444", linewidth=1.2, linestyle=":", alpha=0.85,
+                   label=f"Wall 1  ({pos1:+.0f} m)")
+        ax.axvline(pos2, color="#4499ff", linewidth=1.2, linestyle=":", alpha=0.85,
+                   label=f"Wall 2  ({pos2:+.0f} m)")
+        ax.axvline(0, color="#888888", linewidth=0.8, linestyle="--", alpha=0.65)
+        ax.grid(True, color="#252525", linewidth=0.5)
+    ax_dt.axhline(0, color="#888888", linewidth=0.8, linestyle="--", alpha=0.65)
 
     style_axes(ax_raw, "Raw Elevation",
                xlabel="Distance from pair centroid (m)", ylabel="Elevation (m)")
-    style_axes(ax_dt,  "De-trended  (linear slope removed)",
-               xlabel="Distance from pair centroid (m)", ylabel="Relative elevation (m)")
-    for ax in (ax_raw, ax_dt):
-        ax.grid(True, color="#252525", linewidth=0.5)
+    style_axes(ax_dt,  "LRM  (local relief model)",
+               xlabel="Distance from pair centroid (m)", ylabel="LRM elevation (m)")
 
-    handles, labels = ax_raw.get_legend_handles_labels()
-    skip = max(1, len(handles) // 8)
-    kept = [(h, l) for k, (h, l) in enumerate(zip(handles, labels)) if k % skip == 0]
+    # Legend: raw panel shows offset labels + priority lines
+    handles_r, labels_r = ax_raw.get_legend_handles_labels()
+    priority = {f"Wall 1  ({pos1:+.0f} m)", f"Wall 2  ({pos2:+.0f} m)", "Mean"}
+    skip = max(1, n_valid // 6)
+    kept = [(h, l) for i, (h, l) in enumerate(zip(handles_r, labels_r))
+            if l in priority or i % skip == 0]
     if kept:
-        hs, ls = zip(*kept)
-        ax_raw.legend(hs, ls, fontsize=7, ncol=2, facecolor="#1e1e1e",
+        hs_r, ls_r = zip(*kept)
+        ax_raw.legend(hs_r, ls_r, fontsize=7, ncol=2, facecolor="#1e1e1e",
                       edgecolor="#444", labelcolor="lightgray", loc="best")
-    h2, l2 = ax_dt.get_legend_handles_labels()
-    if h2:
-        ax_dt.legend(h2[-3:], l2[-3:], fontsize=7,
-                     facecolor="#1e1e1e", edgecolor="#444", labelcolor="lightgray")
+
+    handles_d, labels_d = ax_dt.get_legend_handles_labels()
+    ax_dt.legend(handles_d[-5:], labels_d[-5:], fontsize=7,
+                 facecolor="#1e1e1e", edgecolor="#444", labelcolor="lightgray")
+
+    # Shared along-wall-position colourbar for the profile panels
+    n_ts = len(valid_ts)
+    norm_pos = Normalize(vmin=valid_ts[0],
+                         vmax=valid_ts[-1] if n_ts > 1 else valid_ts[0] + 1)
+    sm_pos = plt.cm.ScalarMappable(cmap="plasma", norm=norm_pos)
+    sm_pos.set_array([])
+    cbar_pos = fig.colorbar(sm_pos, ax=[ax_raw, ax_dt],
+                             orientation="vertical", pad=0.01, fraction=0.012, shrink=0.85)
+    cbar_pos.set_label("Along-wall position (m from centroid)", color="lightgray", fontsize=8)
+    cbar_pos.ax.yaxis.set_tick_params(colors="gray")
 
     save_figure(fig, output_dir / name, "detected_pair_profiles.png", dpi=cfg.DPI)
 
@@ -493,8 +590,8 @@ def generate_extra_views(coord: dict, dtm_path: str, output_dir: Path) -> None:
         #orientation_source=lrm,
         return_debug=False
     )
-    pairs = remove_invalid_pairs(pairs, angle_tolerance=cfg.ANGLE_TOLERANCE,
-                                  target_angle=cfg.TARGET_ANGLE)
+    # pairs = remove_invalid_pairs(pairs, angle_tolerance=cfg.ANGLE_TOLERANCE,
+    #                              target_angle=cfg.TARGET_ANGLE)
 
     print(f"  [extra_views] multi-azimuth hillshade …")
     _multi_azimuth_hillshade(raw, extent, nodata, name, output_dir)
@@ -512,4 +609,4 @@ def generate_extra_views(coord: dict, dtm_path: str, output_dir: Path) -> None:
     _road_elevation_profile(smoothed, extent, nodata, lat, lon, name, output_dir)
 
     print(f"  [extra_views] detected-pair cross sections …")
-    _detected_pair_profiles(raw, smoothed, extent, nodata, pairs, name, output_dir)
+    _detected_pair_profiles(raw, smoothed, lrm, extent, nodata, pairs, name, output_dir)

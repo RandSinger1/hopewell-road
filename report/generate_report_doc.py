@@ -93,11 +93,9 @@ doc.add_paragraph()
 
 add_heading(doc, "1.  Introduction", level=1)
 add_para(doc, (
-    "The Hopewell Road corridor in central Ohio was a primary route of the Hopewell "
-    "culture (c. 100 BCE – 500 CE), one of the most sophisticated prehistoric cultures "
-    "of eastern North America.  The Hopewell built extensive earthwork complexes — "
-    "pairs of parallel embankments flanking ceremonial roads — much of which has been "
-    "obscured by modern agriculture, vegetation, and development. "
+    "Archeologists have hypothesized the Great Hopewell was a route of the Hopewell "
+    "culture (c. 100 BCE – 500 CE).  The Hopewell built extensive earthwork complexes, "
+    "much of which have been obscured by modern agriculture, vegetation, and development.  "
     "Many sections of these earthworks are no longer visible at the surface and have "
     "not been systematically surveyed."
 ))
@@ -105,8 +103,8 @@ add_para(doc, (
     "This project applies automated analysis of high-resolution airborne LiDAR data "
     "to detect candidate remnants of these earthwork pairs along the corridor between "
     "Chillicothe and Newark, Ohio.  The approach targets the characteristic morphological "
-    "signature of Hopewell road earthworks: two parallel low-relief linear ridges "
-    "approximately 38–42 m apart, oriented along the road bearing, and visible as "
+    "signature of Hopewell Road earthworks: two parallel low-relief linear ridges "
+    "approximately 32–48 m apart, oriented along the road bearing, and visible as "
     "subtle positive anomalies in the ground surface when regional slope is removed."
 ))
 
@@ -123,9 +121,8 @@ add_para(doc, (
     "the USGS RockyWeb delivery service."
 ))
 add_para(doc, (
-    "The study area encompasses the Hopewell Road corridor from Chillicothe "
-    "(39.31°N, 82.98°W) north-east to Newark (40.05°N, 82.44°W), an extent of "
-    "approximately 95 km."
+    "The study area encompasses the triangle with vertices in Newark (40.0, -82.4), "
+    "Chillicothe (39.6, -82.9), and Circleville (39.6, -82.9)."
 ))
 
 
@@ -176,17 +173,15 @@ add_para(doc, (
     "broadscale topographic trends and sensor noise:"
 ))
 add_bullet(doc, (
-    f"Median smoothing:  A {2*params.MEDIAN_SMOOTH_RADIUS + 1}×"
-    f"{2*params.MEDIAN_SMOOTH_RADIUS + 1} pixel median filter was applied with a "
-    "nodata-aware fill to reduce salt-and-pepper noise from residual vegetation "
-    "returns without displacing sharp earthwork edges."
+    f"Median smoothing: A {params.MEDIAN_SMOOTH_RADIUS}-pixel (1 m/px) radius median filter "
+    "was applied with a nodata-aware fill to reduce salt-and-pepper noise from residual "
+    "vegetation returns without displacing sharp earthwork edges."
 ))
 add_bullet(doc, (
-    f"Local Relief Model (LRM):  The regional mean surface was estimated by a "
-    f"{2*params.LRM_RADIUS + 1}×{2*params.LRM_RADIUS + 1} pixel box filter "
-    f"({2*params.LRM_RADIUS + 1} m at 1 m/px) and subtracted from the smoothed DTM.  "
-    "The LRM isolates micro-topographic features — such as earthwork embankments — "
-    "from underlying valley slopes and broad terrain undulations."
+    f"Local Relief Model (LRM): The regional mean surface was estimated by a "
+    f"{params.LRM_RADIUS}-pixel (1 m/px) radius filter and subtracted from the smoothed DTM.  "
+    "The LRM isolates micro-topographic features such as earthwork embankments from "
+    "underlying valley slopes and broad terrain undulations."
 ))
 
 # 3.4
@@ -194,7 +189,7 @@ add_heading(doc, "3.4  Multi-scale Ridge Enhancement", level=2)
 add_para(doc, (
     "Ridge-like features in the LRM were enhanced using the Frangi vesselness "
     "measure (Frangi et al., 1998), originally developed for vascular segmentation "
-    "in medical imaging and adapted here for elongated topographic ridges.  "
+    "in medical imaging and adapted here for topographic ridges.  "
     "The measure derives from the eigenvalues of the Hessian matrix of the image "
     "intensity (here, relative elevation)."
 ))
@@ -208,15 +203,16 @@ add_para(doc, "    V(σ) = exp(−Rᵦ² / 2β²) · (1 − exp(−S² / 2c²))"
 add_para(doc, (
     "where Rᵦ = λ₂/λ₁ penalises blob-like structures, S = √(λ₁² + λ₂²) suppresses "
     f"background noise, β = 0.5, and c is half the 95th percentile of S.  "
-    f"The filter was applied at scales σ ∈ {params.RIDGE_SCALES} pixels and the "
-    "maximum response across all scales was retained."
+    f"For report figures, the filter was applied at scales σ ∈ {params.RIDGE_SCALES} pixels "
+    "and the maximum response across all scales was retained.  "
+    f"For speed purposes, only σ = {params.SCAN_RIDGE_SCALES[0]} was used in the region search."
 ))
 
 # 3.5
 add_heading(doc, "3.5  Geometric Line Detection and Parallel-Wall Matching", level=2)
 add_para(doc, (
     "Detected ridge pixels were converted to candidate straight-line segments and "
-    "tested for the parallel geometry expected of Hopewell road earthworks:"
+    "tested for the parallel geometry expected of the Great Hopewell Road earthworks:"
 ))
 add_bullet(doc, (
     f"Orientation filtering:  Ridge pixel orientations were estimated from Hessian "
@@ -226,8 +222,9 @@ add_bullet(doc, (
 ))
 add_bullet(doc, (
     f"Thresholding and morphological closing:  The orientation-filtered ridge map was "
-    f"thresholded at a Frangi response of {params.RIDGE_THRESHOLD:.2f}.  A morphological "
-    f"closing with radius {int(params.MORPH_DISK_RADIUS)} px bridged small gaps; "
+    f"thresholded at a Frangi response of {params.RIDGE_THRESHOLD:.2f}.  "
+    "This is quite low, but the nature of the problem prefers false positives.  "
+    f"A morphological closing with radius {int(params.MORPH_DISK_RADIUS)} px bridged small gaps; "
     f"components smaller than {params.BINARY_MIN_OBJECT_SIZE} px² were removed as speckle."
 ))
 add_bullet(doc, (
@@ -247,7 +244,7 @@ add_bullet(doc, (
     f"(iii) overlap ≥ {int(params.OVERLAP_RATIO*100)}% of the shorter segment."
 ))
 add_para(doc, (
-    f"The pipeline was run in a tiled scan across the full corridor using "
+    f"The pipeline was run in a tiled scan across the triangle using "
     f"{params.SCAN_TILE_SIZE_M} m × {params.SCAN_TILE_SIZE_M} m windows with "
     f"{params.SCAN_OVERLAP_M} m overlap."
 ))
@@ -349,24 +346,27 @@ for coord in params.REPORT_COORDS:
 add_heading(doc, "6.  Limitations and Next Steps", level=1)
 add_para(doc, "The automated method has several limitations that field survey would address:")
 add_bullet(doc, (
-    "Detection sensitivity depends on earthwork preservation.  Heavily ploughed "
-    "or eroded sections may produce sub-threshold Frangi responses even where "
-    "earthworks are known to exist."
-))
-add_bullet(doc, (
     f"The orientation and spacing filters are tuned to the Hopewell Road corridor "
     f"bearing.  Segments deviating more than ±{params.ANGLE_TOLERANCE}° from the "
     "expected bearing will be suppressed."
 ))
 add_bullet(doc, (
     "Linear agricultural features (field drainage ditches, hedgerow banks) "
-    "oriented near the corridor bearing may generate false positives.  "
+    "oriented near the corridor bearing generate false positives.  "
     "Candidate sites should be cross-checked against cadastral boundaries and "
     "historical aerial photography."
 ))
 add_bullet(doc, (
     "Ground-truth survey at each candidate site is required to confirm "
     "archaeological significance before any further interpretation."
+))
+add_bullet(doc, (
+    "Most candidate remnants are false positives.  Roads, rivers, and agricultural "
+    "features are incorrectly identified by the model.  Visual confirmation of candidate "
+    "remnants by the human eye is required.  Future work should explore identifying "
+    "remnants with only one of the two parallel lines.  Such an approach will produce "
+    "significantly more false positives.  To mitigate them, ridge width should be "
+    "included as a candidate requirement."
 ))
 
 

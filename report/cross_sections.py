@@ -27,7 +27,7 @@ for _p in (str(_REPO_ROOT), str(_REPORT_DIR)):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-from process_dtm import getGTAndBand, get_window, median_smooth_windowed
+from process_dtm import getGTAndBand, get_window, median_smooth_windowed, local_relief_model
 from report_utils import sample_profile, save_figure, style_axes
 import config as cfg
 
@@ -55,6 +55,7 @@ def generate_cross_section_figure(coord: dict, dtm_path: str, output_dir: Path) 
         return
 
     smoothed = median_smooth_windowed(raw, nodata=nodata, radius=cfg.MEDIAN_SMOOTH_RADIUS)
+    lrm = local_relief_model(smoothed, nodata=nodata)
 
     # Road direction unit vector (east, north) from bearing (CW from north)
     road_east = np.sin(np.radians(bearing))
@@ -81,17 +82,17 @@ def generate_cross_section_figure(coord: dict, dtm_path: str, output_dir: Path) 
             smoothed, extent, lat_c, lon_c,
             bearing, half_w, n_samp, nodata=nodata,
         )
+        _, elev_lrm = sample_profile(
+            lrm, extent, lat_c, lon_c,
+            bearing, half_w, n_samp, nodata=nodata,
+        )
 
         valid = ~np.isnan(elev)
         if valid.sum() < 4:
             continue
 
-        # De-trend: remove linear regional slope
-        coeffs = np.polyfit(dists[valid], elev[valid], 1)
-        detrended = elev - np.polyval(coeffs, dists)
-
         profiles_raw.append(elev)
-        profiles_dt.append(detrended)
+        profiles_dt.append(elev_lrm)
         valid_offsets.append((i, off_m))
 
     if not profiles_raw:
@@ -148,9 +149,9 @@ def generate_cross_section_figure(coord: dict, dtm_path: str, output_dir: Path) 
     style_axes(ax_raw, "Raw Elevation",
                xlabel="Distance from road centreline (m)",
                ylabel="Elevation (m)")
-    style_axes(ax_dt, "De-trended  (regional slope removed)",
+    style_axes(ax_dt, "LRM  (local relief model)",
                xlabel="Distance from road centreline (m)",
-               ylabel="Relative elevation (m)")
+               ylabel="LRM elevation (m)")
 
     for ax in (ax_raw, ax_dt):
         ax.grid(True, color="#252525", linewidth=0.5)
