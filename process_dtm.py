@@ -9,6 +9,7 @@ import json
 import numpy as np
 import matplotlib.pyplot as plt
 from osgeo import gdal
+gdal.UseExceptions()
 from scipy.ndimage import gaussian_filter, generic_filter, median_filter, distance_transform_edt
 from scipy.signal import convolve2d
 from xrspatial import sky_view_factor

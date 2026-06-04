@@ -2,6 +2,7 @@ import pdal
 import json
 from pathlib import Path
 from osgeo import gdal, osr
+gdal.UseExceptions()
 from pyproj import Transformer
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from multiprocessing import freeze_support

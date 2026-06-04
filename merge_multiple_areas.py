@@ -9,6 +9,7 @@ Uses GDAL's Warp functionality (faster than gdal_merge.py for many files).
 
 from pathlib import Path
 from osgeo import gdal
+gdal.UseExceptions()
 from utils import make_gdal_progress_callback
 
 

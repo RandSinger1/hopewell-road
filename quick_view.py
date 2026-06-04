@@ -9,6 +9,7 @@ import sys
 import argparse
 import numpy as np
 from osgeo import gdal
+gdal.UseExceptions()
 import matplotlib.pyplot as plt
 
 import params
