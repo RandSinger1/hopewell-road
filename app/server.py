@@ -210,7 +210,7 @@ def get_dtm_tile(z, x, y):
 
 @app.route("/api/available_folders")
 def available_folders():
-    loc_root = PROJECT_ROOT / "locations"
+    loc_root = PROJECT_ROOT / "data" / "locations"
     if not loc_root.exists():
         return jsonify([])
 
@@ -247,7 +247,7 @@ def _push_error(msg: str) -> None:
 _LAT_M = params.METERS_PER_DEGREE_LAT
 _LON_M = params.METERS_PER_DEGREE_LON_AT_40N
 
-_OSM_CACHE = PROJECT_ROOT / ".osm_roads_cache.json"
+_OSM_CACHE = PROJECT_ROOT / "data" / ".osm_roads_cache.json"
 
 _ROAD_TYPES = (
     "motorway", "motorway_link",
@@ -530,7 +530,7 @@ def main():
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     )
     parser = argparse.ArgumentParser(description="KhthonLiDAR Map Viewer")
-    parser.add_argument("--folder", default="", help="Locations subfolder (e.g. locations/600_600)")
+    parser.add_argument("--folder", default="", help="Locations subfolder (e.g. data/locations/600_600)")
     parser.add_argument("--dtm", default="", help="Path to merged DTM GeoTIFF")
     parser.add_argument("--port", type=int, default=params.SERVER_PORT)
     args = parser.parse_args()

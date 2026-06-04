@@ -245,7 +245,7 @@ TMPL_METHOD: str = "rotation"
 # §7  AREA SCAN  (range_searcher.py)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-SCAN_DTM_PATH: str = "loaded_tiles/Whole_Road/merged_dtm.tif"
+SCAN_DTM_PATH: str = "data/loaded_tiles/Whole_Road/merged_dtm.tif"
 """Path to the merged DTM used for the full-corridor scan (relative to repo root)."""
 
 SCAN_TILE_SIZE_M: int = 600
@@ -286,7 +286,7 @@ segment is flagged as a likely road artefact, not an earthwork."""
 
 OSM_CACHE_TTL_S: int = 86_400
 """Lifetime of the local Overpass API response cache (seconds; default 24 h).
-Delete .osm_roads_cache.json to force a fresh fetch."""
+Delete data/.osm_roads_cache.json to force a fresh fetch."""
 
 OSM_QUERY_TIMEOUT_S: int = 65
 """HTTP request timeout for Overpass API queries (seconds)."""
@@ -331,7 +331,7 @@ order from coarsest to finest, so the most-visible tiles are cached first."""
 # §9  REPORT GENERATION  (report/)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-REPORT_DTM_PATH: str = "loaded_tiles/Whole_Road/merged_dtm.tif"
+REPORT_DTM_PATH: str = "data/loaded_tiles/Whole_Road/merged_dtm.tif"
 """Path to the merged DTM for the report (relative to repo root).
 Can differ from SCAN_DTM_PATH if a higher-resolution mosaic is available."""
 

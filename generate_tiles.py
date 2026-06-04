@@ -77,9 +77,9 @@ def _download_one(args):
 
 
 def generate_tiles(tiles, area, max_workers=4):
-    output_dir = Path(f'loaded_tiles/{area}/raw_tiles')
+    output_dir = Path(f'data/loaded_tiles/{area}/raw_tiles')
     output_dir.mkdir(parents=True, exist_ok=True)
-    failed_log = Path(f'loaded_tiles/{area}/failed_downloads.txt')
+    failed_log = Path(f'data/loaded_tiles/{area}/failed_downloads.txt')
 
     work = [(idx, url, output_dir / f'tile_{idx}.laz') for idx, url in enumerate(tiles)]
     total = len(work)
@@ -109,7 +109,7 @@ def generate_tiles(tiles, area, max_workers=4):
 def main():
     args = parse_args()
     area = args.area
-    with open(Path("saved_file_lists") / f"{area}.json", "r") as f:
+    with open(Path("data/saved_file_lists") / f"{area}.json", "r") as f:
         tile_array = json.load(f)
         tiles = [t['url'] for t in tile_array]
     generate_tiles(tiles, area)

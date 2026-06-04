@@ -318,7 +318,7 @@ def multiscale_ridge_enhancement(data, scales=None, nodata=params.NODATA):
     ridge_all[mask] = nodata
     return ridge_all
 def main():
-    filepath = 'loaded_tiles/Hopewell_Road/merged_dtm.tif'
+    filepath = 'data/loaded_tiles/Hopewell_Road/merged_dtm.tif'
     gt, band, nodata, ds = getGTAndBand(filepath)
     window, extent = get_window(40.0, -82.4, 200, 200, gt, band, nodata)
     processed_window, extent, cmap, label = filter_image(

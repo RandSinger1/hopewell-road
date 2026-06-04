@@ -327,7 +327,7 @@ def search_region(filepath: str, coordinates: tuple[float, float], size_x_meters
 def main():
     walls = (40.0,-82.4)
     weird_thing = (40.0, -82.4)
-    search_region("loaded_tiles/Hopewell_Road/merged_dtm.tif", walls, 200, 200, Path("locations"), picture=False)
+    search_region("data/loaded_tiles/Hopewell_Road/merged_dtm.tif", walls, 200, 200, Path("data/locations"), picture=False)
 
 if __name__ == "__main__":
     main()

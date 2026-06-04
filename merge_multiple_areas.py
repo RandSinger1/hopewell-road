@@ -52,8 +52,8 @@ def merge_dtms(input_files, output_path, merge_alg="last", nodata=None, verbose=
 
 
 if __name__ == "__main__":
-    input_tifs = [Path("loaded_tiles\\Circleville_Road\\merged_dtm.tif"), Path("loaded_tiles\\Hopewell_Road\\merged_dtm.tif")]#[Path(f"loaded_tiles\\Circleville_Road_{i}\\merged_dtm.tif") for i in range(10)]
-    output_file = Path("loaded_tiles\\Whole_Road\\merged_dtm.tif")
+    input_tifs = [Path("data/loaded_tiles/Circleville_Road/merged_dtm.tif"), Path("data/loaded_tiles/Hopewell_Road/merged_dtm.tif")]#[Path(f"data/loaded_tiles/Circleville_Road_{i}/merged_dtm.tif") for i in range(10)]
+    output_file = Path("data/loaded_tiles/Whole_Road/merged_dtm.tif")
     existing = [f for f in input_tifs if f.exists()]
     if len(existing) != len(input_tifs):
         print(f"Warning: {len(input_tifs) - len(existing)} file(s) not found, skipping.")

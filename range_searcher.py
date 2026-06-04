@@ -29,7 +29,7 @@ def tile_polygon(filepath, polygon_vertices, size_x, size_y, overlap):
     output_dir : str
         Directory where search_region will save outputs.
     """
-    hopewell_road_polygon = json.load(open('polygons.json'))['Hopewell_Road']
+    hopewell_road_polygon = json.load(open('data/polygons.json'))['Hopewell_Road']
     # flip x and y
     hopewell_road_polygon = Polygon([(y, x) for x, y in hopewell_road_polygon])
 
@@ -71,7 +71,7 @@ def tile_polygon(filepath, polygon_vertices, size_x, size_y, overlap):
     return coords
 def main(max_workers):
     
-    filepath ='loaded_tiles/Whole_Road/merged_dtm.tif'
+    filepath ='data/loaded_tiles/Whole_Road/merged_dtm.tif'
     circleville =(39.6,-82.9)
     newark = (40.0, -82.4)
     chilicothe = (39.3,-82.9)
@@ -86,7 +86,7 @@ def main(max_workers):
         'size_y': size_y,
         'overlap': overlap
     }
-    output_dir = Path('locations') / f'{size_x}_{size_y}'
+    output_dir = Path('data/locations') / f'{size_x}_{size_y}'
     metadata_path = Path(output_dir) / 'metadata.json'
     #output_dir.mkdir(exist_ok=False)
     json.dump(metadata, metadata_path.open('w'))

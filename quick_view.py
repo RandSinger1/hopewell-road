@@ -122,4 +122,4 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     figsize = tuple(map(int, args.figsize.split(',')))
-    quick_view_dtm(args.input, sample_step=args.step, cmap=args.cmap, figsize=figsize, outpath="quick_view.png")
+    quick_view_dtm(args.input, sample_step=args.step, cmap=args.cmap, figsize=figsize, outpath="data/quick_view.png")

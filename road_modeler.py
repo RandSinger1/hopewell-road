@@ -317,7 +317,7 @@ def detect_parallel_walls_template(
     return peaks, best_ncc
 
 if __name__ == "__main__":
-    gt, band, nodata, ds = getGTAndBand("loaded_tiles/Hopewell_Road/merged_dtm.tif")
+    gt, band, nodata, ds = getGTAndBand("data/loaded_tiles/Hopewell_Road/merged_dtm.tif")
 
     window, extent = get_window(40.0, -82.4, 200, 200, gt, band, nodata)
     for r in [10]:

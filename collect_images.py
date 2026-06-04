@@ -4,7 +4,7 @@ import json
 
 
 def get_polygons(AREA):
-    with open("polygons.json", "r") as f:
+    with open("data/polygons.json", "r") as f:
         polygons = json.load(f)
     polygon_segment = polygons[AREA]
     for i in range(10):
@@ -41,7 +41,7 @@ def array_to_wkt_string(coordinates: list) -> str:
 
 
 def main(AREA="Hart_Island"):
-    output_dir = Path("saved_file_lists")
+    output_dir = Path("data/saved_file_lists")
     output_dir.mkdir(exist_ok=True)
     polygons = get_polygons(AREA)
     metadata = None

@@ -193,7 +193,7 @@ def warp_to_4326_auto(input_tiles, output_tif,
 
 
 def process_tiles(AREA):
-    INPUT_DIR = Path(f"loaded_tiles/{AREA}")
+    INPUT_DIR = Path(f"data/loaded_tiles/{AREA}")
     RAW_DIR = INPUT_DIR / "raw_tiles"
     GROUND_DIR = INPUT_DIR / "ground_tiles"
     DTM_DIR = INPUT_DIR / "dtm_tiles"
@@ -221,7 +221,7 @@ def process_tiles(AREA):
         pdal.Pipeline(dtm_pipeline_json).execute()
 
 def merge_dtms():
-    base = Path("loaded_tiles")
+    base = Path("data/loaded_tiles")
     dtm_tiles = []
     for area_dir in sorted(base.glob("Hopewell_Road_*/dtm_tiles")):
         dtm_tiles.extend(sorted(area_dir.glob("*.tif")))
