@@ -9,8 +9,8 @@ from skimage.measure import label as label_function, regionprops
 from sklearn.linear_model import RANSACRegressor
 import matplotlib.pyplot as plt
 from utils import convert_meters_degrees_pixels, METERS, PIXELS, DEGREES
-from process_dtm import displayWindow, getGTAndBand, get_window, median_smooth_windowed, local_relief_model, multiscale_ridge_enhancement
-import params
+from road_model.process_dtm import displayWindow, getGTAndBand, get_window, median_smooth_windowed, local_relief_model, multiscale_ridge_enhancement
+import parameters
 
 # Per-worker-process cache so each worker opens the DTM file only once.
 _dtm_cache: dict = {}
@@ -69,7 +69,7 @@ def detect_parallel_walls_ridge_pairing(
 
     # ---------- 1. Orientation mask ----------
     orient_source = orientation_source if orientation_source is not None else ridge_map
-    orient_rad = hessian_ridge_orientation(orient_source, sigma=params.HESSIAN_SIGMA)
+    orient_rad = hessian_ridge_orientation(orient_source, sigma=parameters.HESSIAN_SIGMA)
     target_rad = np.deg2rad(target_angle)
     angle_diff = np.abs(orient_rad - target_rad)
     angle_diff = np.minimum(angle_diff, np.pi - angle_diff)  # modulo π
@@ -86,11 +86,11 @@ def detect_parallel_walls_ridge_pairing(
     # The previous `min_size` behaviour removed objects smaller than `min_size`.
     # The new `max_size` removes objects smaller than or equal to the value,
     # so subtract 1 to preserve the original semantics.
-    binary = remove_small_objects(binary, max_size=params.BINARY_MIN_OBJECT_SIZE - 1, connectivity=2)
+    binary = remove_small_objects(binary, max_size=parameters.BINARY_MIN_OBJECT_SIZE - 1, connectivity=2)
 
     # ---------- 3. Robust skeletonization (works for all angles) ----------
     # `binary_closing` moved; use `closing` from skimage.morphology instead
-    binary_closed = closing(binary, footprint=disk(params.MORPH_DISK_RADIUS))
+    binary_closed = closing(binary, footprint=disk(parameters.MORPH_DISK_RADIUS))
     skeleton = medial_axis(binary_closed, return_distance=False)
 
     # ---------- 4. Fit a straight line to each connected component ----------
@@ -149,7 +149,7 @@ def detect_parallel_walls_ridge_pairing(
             # Angle difference (mod π)
             dot = np.clip(np.dot(dir1, dir2), -1.0, 1.0)
             angle_diff_rad = np.arccos(np.abs(dot))
-            if angle_diff_rad > np.deg2rad(params.PAIRING_ANGLE_TOLERANCE_DEG):
+            if angle_diff_rad > np.deg2rad(parameters.PAIRING_ANGLE_TOLERANCE_DEG):
                 continue
 
             # Perpendicular distance
@@ -278,12 +278,12 @@ def search_region(filepath: str, coordinates: tuple[float, float], size_x_meters
         return
     window_original = window.copy()
     window_original = np.where(window_original == nodata, np.nan, window_original)
-    target_angle = params.TARGET_ANGLE
-    angle_tolerance = params.ANGLE_TOLERANCE
+    target_angle = parameters.TARGET_ANGLE
+    angle_tolerance = parameters.ANGLE_TOLERANCE
     if verbose > 0: print(f"Filtering DTM with median smoothing")
     smoothed = median_smooth_windowed(window, nodata=nodata)
     lrm = local_relief_model(smoothed, nodata=nodata)
-    ridge_map = multiscale_ridge_enhancement(lrm, scales=params.SCAN_RIDGE_SCALES, nodata=nodata)
+    ridge_map = multiscale_ridge_enhancement(lrm, scales=parameters.SCAN_RIDGE_SCALES, nodata=nodata)
     nd_mask = window == nodata
     ridge_map = np.where(nd_mask, 0.0, ridge_map.astype(float))
     if verbose > 0: print("Detecting parallel walls …")
@@ -291,12 +291,12 @@ def search_region(filepath: str, coordinates: tuple[float, float], size_x_meters
         ridge_map=ridge_map,
         target_angle=target_angle,
         extent=extent,
-        spacing_meters=params.SPACING_METERS,
+        spacing_meters=parameters.SPACING_METERS,
         angle_tolerance=angle_tolerance,
-        spacing_tolerance=params.SPACING_TOLERANCE,
-        ridge_threshold=params.RIDGE_THRESHOLD,
-        min_ridge_length_meters=params.MIN_RIDGE_LENGTH_METERS,
-        overlap_ratio=params.OVERLAP_RATIO,
+        spacing_tolerance=parameters.SPACING_TOLERANCE,
+        ridge_threshold=parameters.RIDGE_THRESHOLD,
+        min_ridge_length_meters=parameters.MIN_RIDGE_LENGTH_METERS,
+        overlap_ratio=parameters.OVERLAP_RATIO,
         # orientation_source=lrm,
         return_debug=False,
     )

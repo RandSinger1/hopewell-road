@@ -5,23 +5,11 @@ Provides: path setup, hillshading, colourising, DTM profile sampling,
 and figure-save / axes-styling utilities.
 """
 
-import sys
 from pathlib import Path
 
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.ndimage import map_coordinates
-
-# ─── Path bootstrap ───────────────────────────────────────────────────────────
-# Makes the repo root importable (process_dtm, ridge_detection, utils)
-# and the report/ dir importable (config).
-
-_REPORT_DIR = Path(__file__).resolve().parent
-_REPO_ROOT = _REPORT_DIR.parent
-
-for _p in (str(_REPO_ROOT), str(_REPORT_DIR)):
-    if _p not in sys.path:
-        sys.path.insert(0, _p)
 
 
 # ─── Figure helpers ───────────────────────────────────────────────────────────

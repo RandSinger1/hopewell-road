@@ -4,12 +4,7 @@ config.py — Backward-compatible shim; all values now live in params.py.
 Report scripts do ``import config as cfg`` and access names like
 ``cfg.DTM_PATH``.  To change any value, edit params.py in the repo root.
 """
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
-from params import (                          # noqa: E402
+from parameters import (
     REPORT_DTM_PATH          as DTM_PATH,
     REPORT_OUTPUT_DIR        as OUTPUT_DIR,
     REPORT_DPI               as DPI,

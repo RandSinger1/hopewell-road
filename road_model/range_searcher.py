@@ -5,7 +5,7 @@ import numpy as np
 from shapely.geometry import Polygon, Point
 from concurrent.futures import ProcessPoolExecutor
 
-from ridge_detection import search_region
+from road_model.ridge_detection import search_region
 from utils import convert_meters_degrees_pixels, METERS, DEGREES
 
 import json

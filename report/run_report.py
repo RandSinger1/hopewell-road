@@ -25,21 +25,17 @@ sys.dont_write_bytecode = True
 import time
 from pathlib import Path
 
-_REPORT_DIR = Path(__file__).resolve().parent
-_REPO_ROOT = _REPORT_DIR.parent
-for _p in (str(_REPO_ROOT), str(_REPORT_DIR)):
-    if _p not in sys.path:
-        sys.path.insert(0, _p)
-
-import config as cfg
-from pipeline_steps import generate_pipeline_figure
-from cross_sections import generate_cross_section_figure
-from extra_views import generate_extra_views
+from . import config as cfg
+from .pipeline_steps import generate_pipeline_figure
+from .cross_sections import generate_cross_section_figure
+from .extra_views import generate_extra_views
+from .overview_map import generate_overview_map
 
 
 def main() -> None:
-    dtm_path = str(_REPO_ROOT / cfg.DTM_PATH)
-    output_dir = _REPO_ROOT / cfg.OUTPUT_DIR
+    _repo_root = Path(__file__).resolve().parent.parent
+    dtm_path = str(_repo_root / cfg.DTM_PATH)
+    output_dir = _repo_root / cfg.OUTPUT_DIR
 
     if not cfg.REPORT_COORDS:
         print(
@@ -56,6 +52,14 @@ def main() -> None:
     print(f"  Output : {output_dir}")
     print(f"  Coords : {len(cfg.REPORT_COORDS)}")
     print(f"{'═' * 60}\n")
+
+    print("── Overview map ──")
+    try:
+        generate_overview_map(cfg.REPORT_COORDS, dtm_path, output_dir)
+    except Exception as exc:
+        import traceback
+        print(f"  [ERROR] overview_map: {exc}")
+        traceback.print_exc()
 
     for coord in cfg.REPORT_COORDS:
         name = coord["name"]

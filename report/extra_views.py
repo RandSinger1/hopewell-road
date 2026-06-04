@@ -26,7 +26,6 @@ Generates five supplementary figures per coordinate:
 Call generate_extra_views(coord, dtm_path, output_dir) from run_report.py.
 """
 
-import sys
 from pathlib import Path
 
 import numpy as np
@@ -37,19 +36,13 @@ from mpl_toolkits.mplot3d import Axes3D   # noqa: F401 (registers 3D projection)
 from scipy.ndimage import map_coordinates
 from scipy.signal import find_peaks
 
-_REPORT_DIR = Path(__file__).resolve().parent
-_REPO_ROOT = _REPORT_DIR.parent
-for _p in (str(_REPO_ROOT), str(_REPORT_DIR)):
-    if _p not in sys.path:
-        sys.path.insert(0, _p)
-
-from process_dtm import (
+from road_model.process_dtm import (
     getGTAndBand, get_window,
     median_smooth_windowed, local_relief_model, multiscale_ridge_enhancement,
 )
-from ridge_detection import detect_parallel_walls_ridge_pairing, remove_invalid_pairs
-from report_utils import hillshade, render_hillshaded_dtm, save_figure, style_axes, pair_to_geo, sample_profile
-import config as cfg
+from road_model.ridge_detection import detect_parallel_walls_ridge_pairing, remove_invalid_pairs
+from .report_utils import hillshade, render_hillshaded_dtm, save_figure, style_axes, pair_to_geo, sample_profile
+from . import config as cfg
 
 
 # ─────────────────────────────────────────────────────────────────────────────

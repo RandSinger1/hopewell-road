@@ -21,26 +21,19 @@ Row 2 — Detection
 Call generate_pipeline_figure(coord, dtm_path, output_dir) from run_report.py.
 """
 
-import sys
 from pathlib import Path
 
 import numpy as np
 import matplotlib.pyplot as plt
 
-_REPORT_DIR = Path(__file__).resolve().parent
-_REPO_ROOT = _REPORT_DIR.parent
-for _p in (str(_REPO_ROOT), str(_REPORT_DIR)):
-    if _p not in sys.path:
-        sys.path.insert(0, _p)
-
-from process_dtm import (
+from road_model.process_dtm import (
     getGTAndBand, get_window,
     median_smooth_windowed, local_relief_model, sky_view_factor_xr,
     multiscale_ridge_enhancement,
 )
-from ridge_detection import detect_parallel_walls_ridge_pairing, remove_invalid_pairs
-from report_utils import render_hillshaded_dtm, save_figure, style_axes, pair_to_geo
-import config as cfg
+from road_model.ridge_detection import detect_parallel_walls_ridge_pairing, remove_invalid_pairs
+from .report_utils import render_hillshaded_dtm, save_figure, style_axes, pair_to_geo
+from . import config as cfg
 
 
 _STEP_LABELS = [

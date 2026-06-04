@@ -10,8 +10,7 @@ import sys
 import numpy as np
 from PIL import Image
 
-sys.path.insert(0, os.path.normpath(os.path.join(os.path.dirname(__file__), "..")))
-import params
+import parameters
 
 _log = logging.getLogger(__name__)
 
@@ -30,7 +29,7 @@ except ImportError:
     _HAS_RASTERIO = False
 
 
-TILE_SIZE = params.TILE_SIZE_PX
+TILE_SIZE = parameters.TILE_SIZE_PX
 _CACHE_DIR = os.path.join(os.path.dirname(__file__), ".dtm_cache")
 
 
@@ -124,8 +123,8 @@ def _seg_dist_m(px: float, py: float,
                      ((py - ay) * _LAT_M          - t * dy) ** 2)
 
 
-_LAT_M        = params.METERS_PER_DEGREE_LAT
-_LON_M_APPROX = params.METERS_PER_DEGREE_LON_AT_40N
+_LAT_M        = parameters.METERS_PER_DEGREE_LAT
+_LON_M_APPROX = parameters.METERS_PER_DEGREE_LON_AT_40N
 
 
 def iter_corridor_tiles(z: int,
@@ -440,10 +439,10 @@ def _fill_nodata(elev: np.ndarray, mask: np.ndarray) -> np.ndarray:
 
 
 def _hillshade(elev: np.ndarray, mask: np.ndarray,
-               azimuth: float = params.HILLSHADE_AZIMUTH,
-               altitude: float = params.HILLSHADE_ALTITUDE,
+               azimuth: float = parameters.HILLSHADE_AZIMUTH,
+               altitude: float = parameters.HILLSHADE_ALTITUDE,
                cell_m: float = 10.0,
-               z_factor: float = params.HILLSHADE_Z_FACTOR) -> np.ndarray:
+               z_factor: float = parameters.HILLSHADE_Z_FACTOR) -> np.ndarray:
     # Standard GIS hillshade: slope = arctan(z_factor * |∇elev / cell_m|)
     # z_factor > 1 exaggerates vertical relief; cell_m converts pixels → metres.
     dy, dx = np.gradient(elev / cell_m)
@@ -487,7 +486,7 @@ def _terrain_rgb(elev: np.ndarray, mask: np.ndarray,
 # Low-res read helper (used only for elevation range stats)
 # ---------------------------------------------------------------------------
 
-MAX_DIM = params.DTM_MAX_READ_DIM
+MAX_DIM = parameters.DTM_MAX_READ_DIM
 
 
 def _read(path: str, max_dim: int):

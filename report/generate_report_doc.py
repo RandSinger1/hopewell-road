@@ -2,14 +2,12 @@
 generate_report_doc.py
 Generates report/KhthonLiDAR_Report.docx for distribution to archaeologists.
 """
-import sys
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from docx import Document
 from docx.shared import Pt, Inches
 from docx.enum.text import WD_ALIGN_PARAGRAPH
-import params
+import parameters
 
 OUTPUT_DIR = Path(__file__).parent / "output"
 fig_counter = [0]
@@ -141,13 +139,13 @@ add_heading(doc, "3.1  Point-Cloud Preparation", level=2)
 add_para(doc, "Each LAZ tile was processed through a PDAL pipeline comprising three steps:")
 add_bullet(doc, (
     "Statistical outlier removal (filters.outlier):  Points whose distance from "
-    f"the local mean of their {params.OUTLIER_MEAN_K} nearest neighbours exceeded "
-    f"{params.OUTLIER_MULTIPLIER} standard deviations were flagged as noise and discarded."
+    f"the local mean of their {parameters.OUTLIER_MEAN_K} nearest neighbours exceeded "
+    f"{parameters.OUTLIER_MULTIPLIER} standard deviations were flagged as noise and discarded."
 ))
 add_bullet(doc, (
     "Ground classification (filters.smrf):  The Simple Morphological Filter "
     f"(Pingel et al., 2013) was applied with a maximum window radius of "
-    f"{params.SMRF_WINDOW} m and a slope tolerance of {params.SMRF_SLOPE} m/m "
+    f"{parameters.SMRF_WINDOW} m and a slope tolerance of {parameters.SMRF_SLOPE} m/m "
     "to classify returns as ground or non-ground.  Only last returns and single "
     "returns were considered, reducing the influence of canopy returns."
 ))
@@ -160,7 +158,7 @@ add_bullet(doc, (
 add_heading(doc, "3.2  Digital Terrain Model Generation", level=2)
 add_para(doc, (
     f"Ground point clouds were rasterised to Digital Terrain Models (DTMs) at "
-    f"{params.DTM_RESOLUTION} m/pixel using inverse-distance weighting (IDW) "
+    f"{parameters.DTM_RESOLUTION} m/pixel using inverse-distance weighting (IDW) "
     "interpolation via PDAL's GDAL writer.  Individual tile DTMs were then "
     "mosaicked and reprojected to WGS 84 (EPSG:4326) using GDAL Warp with "
     "bilinear resampling, preserving the native ground resolution in degrees per pixel."
@@ -173,13 +171,13 @@ add_para(doc, (
     "broadscale topographic trends and sensor noise:"
 ))
 add_bullet(doc, (
-    f"Median smoothing: A {params.MEDIAN_SMOOTH_RADIUS}-pixel (1 m/px) radius median filter "
+    f"Median smoothing: A {parameters.MEDIAN_SMOOTH_RADIUS}-pixel (1 m/px) radius median filter "
     "was applied with a nodata-aware fill to reduce salt-and-pepper noise from residual "
     "vegetation returns without displacing sharp earthwork edges."
 ))
 add_bullet(doc, (
     f"Local Relief Model (LRM): The regional mean surface was estimated by a "
-    f"{params.LRM_RADIUS}-pixel (1 m/px) radius filter and subtracted from the smoothed DTM.  "
+    f"{parameters.LRM_RADIUS}-pixel (1 m/px) radius filter and subtracted from the smoothed DTM.  "
     "The LRM isolates micro-topographic features such as earthwork embankments from "
     "underlying valley slopes and broad terrain undulations."
 ))
@@ -203,9 +201,9 @@ add_para(doc, "    V(σ) = exp(−Rᵦ² / 2β²) · (1 − exp(−S² / 2c²))"
 add_para(doc, (
     "where Rᵦ = λ₂/λ₁ penalises blob-like structures, S = √(λ₁² + λ₂²) suppresses "
     f"background noise, β = 0.5, and c is half the 95th percentile of S.  "
-    f"For report figures, the filter was applied at scales σ ∈ {params.RIDGE_SCALES} pixels "
+    f"For report figures, the filter was applied at scales σ ∈ {parameters.RIDGE_SCALES} pixels "
     "and the maximum response across all scales was retained.  "
-    f"For speed purposes, only σ = {params.SCAN_RIDGE_SCALES[0]} was used in the region search."
+    f"For speed purposes, only σ = {parameters.SCAN_RIDGE_SCALES[0]} was used in the region search."
 ))
 
 # 3.5
@@ -216,37 +214,37 @@ add_para(doc, (
 ))
 add_bullet(doc, (
     f"Orientation filtering:  Ridge pixel orientations were estimated from Hessian "
-    f"eigenvectors (σ = {params.HESSIAN_SIGMA} px).  Pixels whose orientation deviated "
-    f"more than ±{params.ANGLE_TOLERANCE}° from the expected wall bearing "
-    f"({params.ROAD_BEARING_DEG}° from north) were discarded."
+    f"eigenvectors (σ = {parameters.HESSIAN_SIGMA} px).  Pixels whose orientation deviated "
+    f"more than ±{parameters.ANGLE_TOLERANCE}° from the expected wall bearing "
+    f"({parameters.ROAD_BEARING_DEG}° from north) were discarded."
 ))
 add_bullet(doc, (
     f"Thresholding and morphological closing:  The orientation-filtered ridge map was "
-    f"thresholded at a Frangi response of {params.RIDGE_THRESHOLD:.2f}.  "
+    f"thresholded at a Frangi response of {parameters.RIDGE_THRESHOLD:.2f}.  "
     "This is quite low, but the nature of the problem prefers false positives.  "
-    f"A morphological closing with radius {int(params.MORPH_DISK_RADIUS)} px bridged small gaps; "
-    f"components smaller than {params.BINARY_MIN_OBJECT_SIZE} px² were removed as speckle."
+    f"A morphological closing with radius {int(parameters.MORPH_DISK_RADIUS)} px bridged small gaps; "
+    f"components smaller than {parameters.BINARY_MIN_OBJECT_SIZE} px² were removed as speckle."
 ))
 add_bullet(doc, (
     "Skeletonisation:  The binary mask was thinned to a one-pixel-wide skeleton "
     "using the medial-axis transform."
 ))
 add_bullet(doc, (
-    f"Line fitting:  Each skeleton component longer than {params.MIN_RIDGE_LENGTH_METERS} m "
+    f"Line fitting:  Each skeleton component longer than {parameters.MIN_RIDGE_LENGTH_METERS} m "
     "was approximated by a straight line using total-least-squares regression (cv2.fitLine)."
 ))
 add_bullet(doc, (
     f"Parallel-wall pairing:  Line pairs were accepted if: (i) angular difference "
-    f"≤ {params.PAIRING_ANGLE_TOLERANCE_DEG}°; (ii) perpendicular separation within "
-    f"±{int(params.SPACING_TOLERANCE*100)}% of {params.SPACING_METERS} m "
-    f"({params.SPACING_METERS*(1-params.SPACING_TOLERANCE):.0f}–"
-    f"{params.SPACING_METERS*(1+params.SPACING_TOLERANCE):.0f} m); "
-    f"(iii) overlap ≥ {int(params.OVERLAP_RATIO*100)}% of the shorter segment."
+    f"≤ {parameters.PAIRING_ANGLE_TOLERANCE_DEG}°; (ii) perpendicular separation within "
+    f"±{int(parameters.SPACING_TOLERANCE*100)}% of {parameters.SPACING_METERS} m "
+    f"({parameters.SPACING_METERS*(1-parameters.SPACING_TOLERANCE):.0f}–"
+    f"{parameters.SPACING_METERS*(1+parameters.SPACING_TOLERANCE):.0f} m); "
+    f"(iii) overlap ≥ {int(parameters.OVERLAP_RATIO*100)}% of the shorter segment."
 ))
 add_para(doc, (
     f"The pipeline was run in a tiled scan across the triangle using "
-    f"{params.SCAN_TILE_SIZE_M} m × {params.SCAN_TILE_SIZE_M} m windows with "
-    f"{params.SCAN_OVERLAP_M} m overlap."
+    f"{parameters.SCAN_TILE_SIZE_M} m × {parameters.SCAN_TILE_SIZE_M} m windows with "
+    f"{parameters.SCAN_OVERLAP_M} m overlap."
 ))
 
 
@@ -255,21 +253,21 @@ add_para(doc, (
 add_heading(doc, "4.  Key Parameters", level=1)
 add_para(doc, "All parameters used in the analysis are summarised below.")
 param_rows = [
-    ("DTM resolution",           f"{params.DTM_RESOLUTION} m/pixel"),
-    ("Median smooth radius",     f"{params.MEDIAN_SMOOTH_RADIUS} px ({2*params.MEDIAN_SMOOTH_RADIUS+1}×{2*params.MEDIAN_SMOOTH_RADIUS+1} kernel)"),
-    ("LRM radius",               f"{params.LRM_RADIUS} px ({2*params.LRM_RADIUS+1} m)"),
-    ("Frangi scales (σ)",        str(params.RIDGE_SCALES) + " px"),
-    ("Frangi threshold",         str(params.RIDGE_THRESHOLD)),
-    ("Hessian orientation σ",    f"{params.HESSIAN_SIGMA} px"),
-    ("Orientation tolerance",    f"±{params.ANGLE_TOLERANCE}°"),
-    ("Expected wall bearing",    f"{params.ROAD_BEARING_DEG}° from north"),
-    ("Morph. closing radius",    f"{int(params.MORPH_DISK_RADIUS)} px"),
-    ("Min. component size",      f"{params.BINARY_MIN_OBJECT_SIZE} px²"),
-    ("Min. ridge length",        f"{params.MIN_RIDGE_LENGTH_METERS} m"),
-    ("Expected wall spacing",    f"{params.SPACING_METERS} m"),
-    ("Spacing tolerance",        f"±{int(params.SPACING_TOLERANCE*100)}%"),
-    ("Pairing angle tolerance",  f"±{params.PAIRING_ANGLE_TOLERANCE_DEG}°"),
-    ("Min. overlap ratio",       f"{int(params.OVERLAP_RATIO*100)}%"),
+    ("DTM resolution",           f"{parameters.DTM_RESOLUTION} m/pixel"),
+    ("Median smooth radius",     f"{parameters.MEDIAN_SMOOTH_RADIUS} px ({2*parameters.MEDIAN_SMOOTH_RADIUS+1}×{2*parameters.MEDIAN_SMOOTH_RADIUS+1} kernel)"),
+    ("LRM radius",               f"{parameters.LRM_RADIUS} px ({2*parameters.LRM_RADIUS+1} m)"),
+    ("Frangi scales (σ)",        str(parameters.RIDGE_SCALES) + " px"),
+    ("Frangi threshold",         str(parameters.RIDGE_THRESHOLD)),
+    ("Hessian orientation σ",    f"{parameters.HESSIAN_SIGMA} px"),
+    ("Orientation tolerance",    f"±{parameters.ANGLE_TOLERANCE}°"),
+    ("Expected wall bearing",    f"{parameters.ROAD_BEARING_DEG}° from north"),
+    ("Morph. closing radius",    f"{int(parameters.MORPH_DISK_RADIUS)} px"),
+    ("Min. component size",      f"{parameters.BINARY_MIN_OBJECT_SIZE} px²"),
+    ("Min. ridge length",        f"{parameters.MIN_RIDGE_LENGTH_METERS} m"),
+    ("Expected wall spacing",    f"{parameters.SPACING_METERS} m"),
+    ("Spacing tolerance",        f"±{int(parameters.SPACING_TOLERANCE*100)}%"),
+    ("Pairing angle tolerance",  f"±{parameters.PAIRING_ANGLE_TOLERANCE_DEG}°"),
+    ("Min. overlap ratio",       f"{int(parameters.OVERLAP_RATIO*100)}%"),
 ]
 add_table(doc, ["Parameter", "Value"], param_rows)
 doc.add_paragraph()
@@ -289,16 +287,16 @@ add_para(doc, (
 
 # Summary table
 site_rows = [(c["name"], f"{c['lat']:.4f}° N,  {c['lon']:.4f}° W", c.get("note", ""))
-             for c in params.REPORT_COORDS]
+             for c in parameters.REPORT_COORDS]
 add_table(doc, ["Site", "Coordinates (WGS 84)", "Notes"], site_rows)
 doc.add_paragraph()
 
 # Per-site images
-for coord in params.REPORT_COORDS:
+for coord in parameters.REPORT_COORDS:
     name = coord["name"]
     site_dir = OUTPUT_DIR / name
 
-    add_heading(doc, f"5.{params.REPORT_COORDS.index(coord)+1}  {name}", level=2)
+    add_heading(doc, f"5.{parameters.REPORT_COORDS.index(coord)+1}  {name}", level=2)
     add_para(doc, (
         f"Location: {coord['lat']:.4f}° N, {coord['lon']:.4f}° W.  "
         f"{coord.get('note', '')}"
@@ -347,7 +345,7 @@ add_heading(doc, "6.  Limitations and Next Steps", level=1)
 add_para(doc, "The automated method has several limitations that field survey would address:")
 add_bullet(doc, (
     f"The orientation and spacing filters are tuned to the Hopewell Road corridor "
-    f"bearing.  Segments deviating more than ±{params.ANGLE_TOLERANCE}° from the "
+    f"bearing.  Segments deviating more than ±{parameters.ANGLE_TOLERANCE}° from the "
     "expected bearing will be suppressed."
 ))
 add_bullet(doc, (

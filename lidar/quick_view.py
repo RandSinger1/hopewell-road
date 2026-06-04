@@ -12,7 +12,7 @@ from osgeo import gdal
 gdal.UseExceptions()
 import matplotlib.pyplot as plt
 
-import params
+import parameters
 
 def quick_view_dtm(input_path, sample_step=10, cmap='viridis', figsize=(12, 8), outpath = None):
     """
@@ -111,7 +111,7 @@ def quick_view_dtm(input_path, sample_step=10, cmap='viridis', figsize=(12, 8), 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Quickly view a large DTM at low resolution")
-    parser.add_argument("--input", type = str, default = params.REPORT_DTM_PATH,
+    parser.add_argument("--input", type = str, default = parameters.REPORT_DTM_PATH,
                         help="Input GeoTIFF file")
     parser.add_argument("--step", type=int, default=1000,
                         help="Sampling step (every Nth pixel), default=10")

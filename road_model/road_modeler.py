@@ -19,7 +19,7 @@ import cv2
 from scipy.ndimage import rotate, uniform_filter1d, correlate1d
 from skimage.feature import peak_local_max
 from utils import DEGREES, METERS, PIXELS, convert_meters_degrees_pixels, create_parallel_ridge_kernel_compact
-from process_dtm import displayWindow, getGTAndBand, get_window, filter_image
+from road_model.process_dtm import displayWindow, getGTAndBand, get_window, filter_image
 
 
 # ----------------------------------------------------------------------

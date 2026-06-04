@@ -15,7 +15,7 @@ from scipy.signal import convolve2d
 from xrspatial import sky_view_factor
 from utils import meters_to_degrees, create_parallel_ridge_kernel_compact
 import xarray as xr
-import params
+import parameters
 
 
 def get_window(lat, lon, size_x_meters, size_y_meters, gt, band, nodata):
@@ -49,11 +49,11 @@ def getGTAndBand(filepath):
     return gt, band, nodata, ds
 
 
-def filter_image(window, extent, nodata=params.NODATA, contours=False, gaussian_smoothing=False,
-                  median_smoothing=False, lrm=False, lrm_radius=params.LRM_RADIUS,
-                  svf=False, svf_radius=params.SVF_RADIUS, svf_directions=params.SVF_DIRECTIONS,
+def filter_image(window, extent, nodata=parameters.NODATA, contours=False, gaussian_smoothing=False,
+                  median_smoothing=False, lrm=False, lrm_radius=parameters.LRM_RADIUS,
+                  svf=False, svf_radius=parameters.SVF_RADIUS, svf_directions=parameters.SVF_DIRECTIONS,
                   ridge=False, ridge_scales=None,
-                  smoothing_radius=params.MEDIAN_SMOOTH_RADIUS, smoothing_sigma=1.0, title=None):
+                  smoothing_radius=parameters.MEDIAN_SMOOTH_RADIUS, smoothing_sigma=1.0, title=None):
     """
     Display a LiDAR window with optional archaeological pre-processing.
 
@@ -91,7 +91,7 @@ def filter_image(window, extent, nodata=params.NODATA, contours=False, gaussian_
         Sigma for Gaussian kernel.
     """
     if ridge_scales is None:
-        ridge_scales = params.RIDGE_SCALES
+        ridge_scales = parameters.RIDGE_SCALES
 
     if gaussian_smoothing:
         window = gaussian_smooth_windowed(window, nodata=nodata,
@@ -222,7 +222,7 @@ def displayWindow(window, extent, cmap, label=None, contours=False, lines=None,
 # Raster processing helpers
 # ----------------------------------------------------------------------
 
-def gaussian_smooth_windowed(data, nodata=params.NODATA, radius=params.MEDIAN_SMOOTH_RADIUS, sigma=1.0):
+def gaussian_smooth_windowed(data, nodata=parameters.NODATA, radius=parameters.MEDIAN_SMOOTH_RADIUS, sigma=1.0):
     """Smooth a raster while ignoring nodata values."""
     mask = data == nodata
     valid = np.where(mask, 0, data)
@@ -234,7 +234,7 @@ def gaussian_smooth_windowed(data, nodata=params.NODATA, radius=params.MEDIAN_SM
     return result
 
 
-def median_smooth_windowed(data, nodata=params.NODATA, radius=params.MEDIAN_SMOOTH_RADIUS):
+def median_smooth_windowed(data, nodata=parameters.NODATA, radius=parameters.MEDIAN_SMOOTH_RADIUS):
     """Median filter a raster while ignoring nodata values."""
     mask = data == nodata
     arr = data.astype(float)
@@ -248,7 +248,7 @@ def median_smooth_windowed(data, nodata=params.NODATA, radius=params.MEDIAN_SMOO
     return result
 
 
-def local_relief_model(data, radius=params.LRM_RADIUS, nodata=params.NODATA):
+def local_relief_model(data, radius=parameters.LRM_RADIUS, nodata=parameters.NODATA):
     """
     Local Relief Model: subtract a large-scale mean surface.
     Uses a square box filter of radius `radius` cells, masking nodata.
@@ -266,21 +266,21 @@ def local_relief_model(data, radius=params.LRM_RADIUS, nodata=params.NODATA):
     return lrm
 
 
-def sky_view_factor_xr(window, radius=params.SVF_RADIUS, directions=params.SVF_DIRECTIONS, nodata=params.NODATA):
+def sky_view_factor_xr(window, radius=parameters.SVF_RADIUS, directions=parameters.SVF_DIRECTIONS, nodata=parameters.NODATA):
     da = xr.DataArray(window, dims=["y", "x"])
     da = da.where(da != nodata)
     svf = sky_view_factor(agg=da, max_radius=radius, n_directions=directions)
     return svf.values
 
 
-def multiscale_ridge_enhancement(data, scales=None, nodata=params.NODATA):
+def multiscale_ridge_enhancement(data, scales=None, nodata=parameters.NODATA):
     """
     Multi-scale ridge enhancement using the Frangi vesselness measure.
     Returns the maximum ridge response across the given scales.
     Nodata pixels are filled with the median before processing and restored after.
     """
     if scales is None:
-        scales = params.RIDGE_SCALES
+        scales = parameters.RIDGE_SCALES
     mask = data == nodata
     fill_val = np.nanmedian(np.where(mask, np.nan, data))
     working = np.where(mask, fill_val, data.astype(np.float64))

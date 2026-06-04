@@ -149,12 +149,12 @@ SVF_DIRECTIONS: int = 16
 
 # ── Road / earthwork geometry ─────────────────────────────────────────────────
 
-ROAD_BEARING_DEG: float = 38.0
+ROAD_BEARING_DEG: float = 32.0
 """Bearing of the Hopewell Road corridor (degrees clockwise from north).
 Used to define the expected wall orientation and to orient cross-section
 transects in the report."""
 
-TARGET_ANGLE: float = 38.0
+TARGET_ANGLE: float = 32.0
 """Expected wall orientation in image space (degrees counter-clockwise from
 the +x axis).  Calibrated against the Van Voorhis ground-truth site."""
 

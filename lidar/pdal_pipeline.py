@@ -6,8 +6,9 @@ gdal.UseExceptions()
 from pyproj import Transformer
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from multiprocessing import freeze_support
+import argparse
 
-import params
+import parameters
 
 # ---------- configuration ----------
 VERBOSE = 1
@@ -20,18 +21,18 @@ def make_pipeline(input_laz, output_laz):
         {   # denoise (remove isolated noise points)
             "type": "filters.outlier",
             "method": "statistical",
-            "mean_k": params.OUTLIER_MEAN_K,
-            "multiplier": params.OUTLIER_MULTIPLIER,
+            "mean_k": parameters.OUTLIER_MEAN_K,
+            "multiplier": parameters.OUTLIER_MULTIPLIER,
         },
         {   # ground classification (SMRF — Pingel et al. 2013)
             "type": "filters.smrf",
-            "cell": params.SMRF_CELL,
-            "window": params.SMRF_WINDOW,
-            "slope": params.SMRF_SLOPE,
-            "threshold": params.SMRF_THRESHOLD,
-            "scalar": params.SMRF_SCALAR,
-            "cut": params.SMRF_CUT,
-            "returns": params.SMRF_RETURNS,
+            "cell": parameters.SMRF_CELL,
+            "window": parameters.SMRF_WINDOW,
+            "slope": parameters.SMRF_SLOPE,
+            "threshold": parameters.SMRF_THRESHOLD,
+            "scalar": parameters.SMRF_SCALAR,
+            "cut": parameters.SMRF_CUT,
+            "returns": parameters.SMRF_RETURNS,
         },
         {   # keep only ground points (class 2)
             "type": "filters.range",
@@ -55,8 +56,8 @@ def make_dtm_pipeline(input_laz, output_tif):
         {
             "type": "writers.gdal",
             "filename": output_tif,
-            "resolution": params.DTM_RESOLUTION,
-            "output_type": params.DTM_INTERP_METHOD,
+            "resolution": parameters.DTM_RESOLUTION,
+            "output_type": parameters.DTM_INTERP_METHOD,
             "gdaldriver": "GTiff"
         }
     ])
@@ -72,8 +73,8 @@ def warp_progress(complete, message, user_data):
 
 
 def warp_to_4326_auto(input_tiles, output_tif,
-                       resample=params.WARP_RESAMPLE,
-                       nodata=params.WARP_NODATA,
+                       resample=parameters.WARP_RESAMPLE,
+                       nodata=parameters.WARP_NODATA,
                        creation_opts=None, callback=None,
                        multithread=True):
     """
@@ -90,7 +91,7 @@ def warp_to_4326_auto(input_tiles, output_tif,
         raise ValueError("No input tiles with a valid CRS found.")
 
     if creation_opts is None:
-        creation_opts = params.WARP_CREATION_OPTS
+        creation_opts = parameters.WARP_CREATION_OPTS
 
     # 1. Read metadata from first tile
     first_ds = gdal.Open(input_tiles[0])
@@ -220,32 +221,49 @@ def process_tiles(AREA):
         dtm_pipeline_json = make_dtm_pipeline(str(ground_file), str(dtm_out))
         pdal.Pipeline(dtm_pipeline_json).execute()
 
-def merge_dtms():
+def merge_dtms(sub_areas: list[str], output_path) -> "Path | None":
+    """Merge DTM tiles from sub_areas into a single GeoTIFF at output_path."""
     base = Path("data/loaded_tiles")
     dtm_tiles = []
-    for area_dir in sorted(base.glob("Hopewell_Road_*/dtm_tiles")):
-        dtm_tiles.extend(sorted(area_dir.glob("*.tif")))
-    for area_dir in sorted(base.glob("Circleville_Road_*/dtm_tiles")):
-        dtm_tiles.extend(sorted(area_dir.glob("*.tif")))
+    for sa in sub_areas:
+        area_dtm_dir = base / sa / "dtm_tiles"
+        if area_dtm_dir.exists():
+            dtm_tiles.extend(sorted(area_dtm_dir.glob("*.tif")))
 
     if not dtm_tiles:
         print("No DTM tiles found.")
-        return
+        return None
 
-    output_path = base / "Whole_Road" / "merged_dtm.tif"
+    output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     print(f"Found {len(dtm_tiles)} DTM tiles — warping to {output_path}")
     warp_to_4326_auto(dtm_tiles, output_path, callback=warp_progress)
+    return output_path
 
 
 if __name__ == "__main__":
-    
+    parser = argparse.ArgumentParser(description="Process LiDAR tiles for a specified area.")
+    parser.add_argument("area", type=str, nargs="+",
+                        help="Area(s) to process (e.g., Hopewell_Road, Circleville_Road, full_road)")
+    parser.add_argument("--area-splits", type=int, default=1, metavar="N")
+    args = parser.parse_args()
+
+    sub_areas: list[str] = []
+    for a in args.area:
+        if a == "full_road":
+            sub_areas += ([f"Hopewell_Road_{i}" for i in range(args.area_splits)] +
+                          [f"Circleville_Road_{i}" for i in range(args.area_splits)])
+        elif args.area_splits > 1:
+            sub_areas += [f"{a}_{i}" for i in range(args.area_splits)]
+
     freeze_support()
-    areas = [f"Hopewell_Road_{i}" for i in range(1, 11)] + [f"Circleville_Road_{i}" for i in range(0, 10)]
     with ProcessPoolExecutor(max_workers=5) as executor:
-        futures = [executor.submit(process_tiles, name) for name in areas]
+        futures = [executor.submit(process_tiles, name) for name in sub_areas]
         for future in as_completed(futures):
             future.result()
-    merge_dtms()
+
+    if len(sub_areas) > 1:
+        out_name = "Whole_Road" if set(args.area) == {"full_road"} else "_".join(args.area)
+        merge_dtms(sub_areas, Path(f"data/loaded_tiles/{out_name}/merged_dtm.tif"))
 
     

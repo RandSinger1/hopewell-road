@@ -15,10 +15,7 @@ from pathlib import Path
 
 from flask import Flask, jsonify, render_template, request, send_file
 
-PROJECT_ROOT = Path(__file__).parent.parent
-sys.path.insert(0, str(PROJECT_ROOT))
-
-import params
+import parameters
 
 log = logging.getLogger(__name__)
 
@@ -138,9 +135,9 @@ def prewarm_priority():
     }
 
     def _worker(snap):
-        from dtm_renderer import render_tile, iter_corridor_tiles
+        from .dtm_renderer import render_tile, iter_corridor_tiles
         # Progressively finer zoom with shrinking buffers
-        zoom_levels = params.PREWARM_ZOOM_SCHEDULE
+        zoom_levels = parameters.PREWARM_ZOOM_SCHEDULE
         total = 0
         for zoom, default_buf in zoom_levels:
             specs = [(c[0], c[1], c[2], c[3],
@@ -176,7 +173,7 @@ def get_dtm_stats():
     except ValueError:
         return jsonify({"error": "Invalid bbox"}), 400
     try:
-        from dtm_renderer import read_region_elev_range
+        from .dtm_renderer import read_region_elev_range
         lo, hi = read_region_elev_range(state["dtm_path"], w, s, e, n)
         return jsonify({"lo": round(lo, 1), "hi": round(hi, 1)})
     except Exception as ex:
@@ -196,7 +193,7 @@ def get_dtm_tile(z, x, y):
     except (ValueError, TypeError):
         lo, hi = state["dtm_elev_range"]
     try:
-        from dtm_renderer import render_tile
+        from .dtm_renderer import render_tile
         png = render_tile(
             state["dtm_path"], z, x, y,
             (lo, hi),
@@ -244,8 +241,8 @@ def _push_error(msg: str) -> None:
 # OSM-based road detection
 # ---------------------------------------------------------------------------
 
-_LAT_M = params.METERS_PER_DEGREE_LAT
-_LON_M = params.METERS_PER_DEGREE_LON_AT_40N
+_LAT_M = parameters.METERS_PER_DEGREE_LAT
+_LON_M = parameters.METERS_PER_DEGREE_LON_AT_40N
 
 _OSM_CACHE = PROJECT_ROOT / "data" / ".osm_roads_cache.json"
 
@@ -265,7 +262,7 @@ def _load_osm_cache(south, west, north, east):
             c = json.load(f)
         cs, cw, cn, ce = c["bbox"]
         if cs <= south and cw <= west and cn >= north and ce >= east:
-            if time.time() - c["ts"] < params.OSM_CACHE_TTL_S:
+            if time.time() - c["ts"] < parameters.OSM_CACHE_TTL_S:
                 segs = c["segs"]
                 log.info("OSM cache hit: %d road segments (%.1f h old)",
                          len(segs), (time.time() - c["ts"]) / 3600)
@@ -308,7 +305,7 @@ def _fetch_osm_roads(south, west, north, east) -> list:
                 "User-Agent":   "KhthonLiDAR/1.0 (archaeological survey tool)",
             },
         )
-        with urllib.request.urlopen(req, timeout=params.OSM_QUERY_TIMEOUT_S) as resp:
+        with urllib.request.urlopen(req, timeout=parameters.OSM_QUERY_TIMEOUT_S) as resp:
             result = json.loads(resp.read().decode())
     except urllib.error.URLError as e:
         log.warning("Overpass API unreachable: %s — road filtering disabled", e)
@@ -343,10 +340,10 @@ def _pt_seg_dist_m(px, py, ax, ay, bx, by) -> float:
                      ((py - ay - t * (by - ay)) * _LAT_M) ** 2)
 
 
-def _mark_osm_road_lines(lines: list, segs: list, threshold_m: float = params.OSM_ROAD_THRESHOLD_M) -> int:
+def _mark_osm_road_lines(lines: list, segs: list, threshold_m: float = parameters.OSM_ROAD_THRESHOLD_M) -> int:
     if not segs:
         return 0
-    buf = threshold_m / params.METERS_PER_DEGREE_LON_AT_40N
+    buf = threshold_m / parameters.METERS_PER_DEGREE_LON_AT_40N
     marked = 0
     for ln in lines:
         mx = (ln["xs"] + ln["xe"]) / 2
@@ -409,7 +406,7 @@ def _load_lines(folder: str) -> list:
     if lines:
         all_lons = [(ln["xs"] + ln["xe"]) / 2 for ln in lines]
         all_lats = [(ln["ys"] + ln["ye"]) / 2 for ln in lines]
-        margin = params.OSM_BBOX_MARGIN_DEG
+        margin = parameters.OSM_BBOX_MARGIN_DEG
         south = min(all_lats) - margin
         west  = min(all_lons) - margin
         north = max(all_lats) + margin
@@ -508,7 +505,7 @@ def _ensure_dtm():
     if not state["dtm_path"] or not os.path.exists(state["dtm_path"]):
         return
     try:
-        from dtm_renderer import read_dtm_info, build_overviews
+        from .dtm_renderer import read_dtm_info, build_overviews
         bounds, elev_range = read_dtm_info(state["dtm_path"])
         state["dtm_bounds"] = bounds
         state["dtm_elev_range"] = elev_range
@@ -532,7 +529,7 @@ def main():
     parser = argparse.ArgumentParser(description="KhthonLiDAR Map Viewer")
     parser.add_argument("--folder", default="", help="Locations subfolder (e.g. data/locations/600_600)")
     parser.add_argument("--dtm", default="", help="Path to merged DTM GeoTIFF")
-    parser.add_argument("--port", type=int, default=params.SERVER_PORT)
+    parser.add_argument("--port", type=int, default=parameters.SERVER_PORT)
     args = parser.parse_args()
 
     if args.folder:
@@ -548,7 +545,7 @@ def main():
     log.info("Starting on http://127.0.0.1:%d", args.port)
     try:
         from waitress import serve
-        serve(app, host="127.0.0.1", port=args.port, threads=params.SERVER_THREADS)
+        serve(app, host="127.0.0.1", port=args.port, threads=parameters.SERVER_THREADS)
     except ImportError:
         log.warning("waitress not installed, falling back to Flask dev server")
         app.run(debug=False, port=args.port, threaded=True)

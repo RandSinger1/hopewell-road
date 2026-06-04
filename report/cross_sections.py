@@ -14,22 +14,15 @@ Two panels per coordinate:
 Call generate_cross_section_figure(coord, dtm_path, output_dir) from run_report.py.
 """
 
-import sys
 from pathlib import Path
 
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 
-_REPORT_DIR = Path(__file__).resolve().parent
-_REPO_ROOT = _REPORT_DIR.parent
-for _p in (str(_REPO_ROOT), str(_REPORT_DIR)):
-    if _p not in sys.path:
-        sys.path.insert(0, _p)
-
-from process_dtm import getGTAndBand, get_window, median_smooth_windowed, local_relief_model
-from report_utils import sample_profile, save_figure, style_axes
-import config as cfg
+from road_model.process_dtm import getGTAndBand, get_window, median_smooth_windowed, local_relief_model
+from .report_utils import sample_profile, save_figure, style_axes
+from . import config as cfg
 
 
 def generate_cross_section_figure(coord: dict, dtm_path: str, output_dir: Path) -> None:
