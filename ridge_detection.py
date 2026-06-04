@@ -12,12 +12,20 @@ from utils import convert_meters_degrees_pixels, METERS, PIXELS, DEGREES
 from process_dtm import displayWindow, getGTAndBand, get_window, median_smooth_windowed, local_relief_model, multiscale_ridge_enhancement
 import params
 
+# Per-worker-process cache so each worker opens the DTM file only once.
+_dtm_cache: dict = {}
+
+def _get_dtm(filepath: str):
+    if filepath not in _dtm_cache:
+        _dtm_cache[filepath] = getGTAndBand(filepath)
+    return _dtm_cache[filepath]
+
 def hessian_ridge_orientation(image, sigma=1.0):
     """Return ridge orientation (radians, [0, π)) from Hessian."""
-    img_smooth = gaussian_filter(image.astype(np.float64), sigma=sigma)
-    Iy, Ix = np.gradient(img_smooth)
-    Iyy, Iyx = np.gradient(Iy)
-    Ixy, Ixx = np.gradient(Ix)   # Ixy == Iyx
+    img = image.astype(np.float64)
+    Ixx = gaussian_filter(img, sigma=sigma, order=(0, 2))
+    Iyy = gaussian_filter(img, sigma=sigma, order=(2, 0))
+    Ixy = gaussian_filter(img, sigma=sigma, order=(1, 1))
 
     theta = 0.5 * np.arctan2(2 * Ixy, Ixx - Iyy)   # range [-π/2, π/2]
     orient = theta + np.pi / 2.0
@@ -109,27 +117,35 @@ def detect_parallel_walls_ridge_pairing(
         lines.append((pt1, pt2))
 
     # ---------- 5. Find parallel pairs ----------
-    pairs = []
-
-    for i in range(len(lines)):
-        l1 = lines[i]
-        dx1, dy1 = l1[1][0] - l1[0][0], l1[1][1] - l1[0][1]
-        len1 = np.hypot(dx1, dy1)
-        if len1 < min_ridge_length_px:
+    # Pre-compute per-line geometry once; filter short lines before the O(n²) loop.
+    line_props = []
+    for l in lines:
+        dx, dy = l[1][0] - l[0][0], l[1][1] - l[0][1]
+        length = np.hypot(dx, dy)
+        if length < min_ridge_length_px:
             continue
-        dir1 = np.array([dx1, dy1]) / len1
-        mid1 = np.array(l1[0]) + 0.5 * np.array([dx1, dy1])
-        perp1 = np.array([-dir1[1], dir1[0]])
+        direction = np.array([dx, dy]) / length
+        midpoint = np.array(l[0]) + 0.5 * np.array([dx, dy])
+        perp = np.array([-direction[1], direction[0]])
+        line_props.append((l, length, direction, midpoint, perp))
 
-        for j in range(i + 1, len(lines)):
-            l2 = lines[j]
-            dx2, dy2 = l2[1][0] - l2[0][0], l2[1][1] - l2[0][1]
-            len2 = np.hypot(dx2, dy2)
-            if len2 < min_ridge_length_px:
-                continue
-            dir2 = np.array([dx2, dy2]) / len2
-            mid2 = np.array(l2[0]) + 0.5 * np.array([dx2, dy2])
+    # Cache ridge-mean samples per line index to avoid repeated map_coordinates
+    # when the same line appears in multiple candidate pairs.
+    _ridge_mean_cache: dict = {}
 
+    def _line_mean_ridge(idx, line, n=50):
+        if idx not in _ridge_mean_cache:
+            xs = np.linspace(line[0][0], line[1][0], n)
+            ys = np.linspace(line[0][1], line[1][1], n)
+            ys = np.clip(ys, 0, ridge_map.shape[0] - 1)
+            xs = np.clip(xs, 0, ridge_map.shape[1] - 1)
+            vals = map_coordinates(ridge_map, [ys, xs], order=1, mode='nearest')
+            _ridge_mean_cache[idx] = np.mean(vals) if len(vals) else 0.0
+        return _ridge_mean_cache[idx]
+
+    pairs = []
+    for i, (l1, len1, dir1, mid1, perp1) in enumerate(line_props):
+        for j, (l2, len2, dir2, mid2, _) in enumerate(line_props[i + 1:], i + 1):
             # Angle difference (mod π)
             dot = np.clip(np.dot(dir1, dir2), -1.0, 1.0)
             angle_diff_rad = np.arccos(np.abs(dot))
@@ -145,22 +161,11 @@ def detect_parallel_walls_ridge_pairing(
             avg_dir = (dir1 + dir2) / np.linalg.norm(dir1 + dir2)
             t1_vals = [np.dot(np.array(p) - mid1, avg_dir) for p in l1]
             t2_vals = [np.dot(np.array(p) - mid1, avg_dir) for p in l2]
-            t1_min, t1_max = min(t1_vals), max(t1_vals)
-            t2_min, t2_max = min(t2_vals), max(t2_vals)
-            overlap = max(0.0, min(t1_max, t2_max) - max(t1_min, t2_min))
+            overlap = max(0.0, min(max(t1_vals), max(t2_vals)) - max(min(t1_vals), min(t2_vals)))
             if overlap < overlap_ratio * min(len1, len2):
                 continue
 
-            # Score: shorter length × mean ridge strength
-            def line_mean_ridge(line, n=50):
-                xs = np.linspace(line[0][0], line[1][0], n)
-                ys = np.linspace(line[0][1], line[1][1], n)
-                ys = np.clip(ys, 0, ridge_map.shape[0] - 1)
-                xs = np.clip(xs, 0, ridge_map.shape[1] - 1)
-                vals = map_coordinates(ridge_map, [ys, xs], order=1, mode='nearest')
-                return np.mean(vals) if len(vals) else 0.0
-
-            score = min(len1, len2) * 0.5 * (line_mean_ridge(l1) + line_mean_ridge(l2))
+            score = min(len1, len2) * 0.5 * (_line_mean_ridge(i, l1) + _line_mean_ridge(j, l2))
 
             pairs.append({
                 'line1': l1,
@@ -262,10 +267,11 @@ def remove_invalid_pairs(
 
 def search_region(filepath: str, coordinates: tuple[float, float], size_x_meters: float, size_y_meters: float, output_dir: Path, verbose: int = 0, picture: bool = False):
     output_path = Path(output_dir) / f"{round(coordinates[0], 4)}_{round(coordinates[1], 4)}"
+    print(f"Writing to {output_path} …")
     if (output_path / "line_overlay.json").exists():
         return
     makedirs(output_path, exist_ok=True)
-    gt, band, nodata, ds = getGTAndBand(filepath)
+    gt, band, nodata, ds = _get_dtm(filepath)
 
     window, extent = get_window(coordinates[0], coordinates[1], size_x_meters, size_y_meters, gt, band, nodata)
     if window is None:

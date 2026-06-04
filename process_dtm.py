@@ -289,10 +289,11 @@ def multiscale_ridge_enhancement(data, scales=None, nodata=params.NODATA):
     beta = 0.5
 
     for s in scales:
-        smoothed = gaussian_filter(working, sigma=s)
-        Dxx = gaussian_filter(smoothed, sigma=s, order=(0, 2))
-        Dyy = gaussian_filter(smoothed, sigma=s, order=(2, 0))
-        Dxy = gaussian_filter(smoothed, sigma=s, order=(1, 1))
+        # Compute second derivatives of the original working image at scale s.
+        # Avoid redundant smoothing by directly requesting derivative filters.
+        Dxx = gaussian_filter(working, sigma=s, order=(0, 2))
+        Dyy = gaussian_filter(working, sigma=s, order=(2, 0))
+        Dxy = gaussian_filter(working, sigma=s, order=(1, 1))
 
         # Analytic eigenvalues of the 2x2 symmetric Hessian (vectorized)
         disc = np.sqrt((Dxx - Dyy) ** 2 + 4 * Dxy ** 2)
