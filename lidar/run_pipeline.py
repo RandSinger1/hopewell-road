@@ -181,7 +181,7 @@ def main():
         help="Produce a separate merged DTM per year (e.g. Hart_Island 2014, 2015, …)",
     )
     parser.add_argument(
-        "--area-splits", type=int, default=10, metavar="N",
+        "--area-splits", type=int, default=15, metavar="N",
         help="Sub-segments to split road-type polygons into (default 10)",
     )
     parser.add_argument(

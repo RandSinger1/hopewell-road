@@ -31,9 +31,10 @@ from road_model.process_dtm import (
     median_smooth_windowed, local_relief_model, sky_view_factor_xr,
     multiscale_ridge_enhancement,
 )
-from road_model.ridge_detection import detect_parallel_walls_ridge_pairing, remove_invalid_pairs
+from road_model.ridge_detection import detect_parallel_walls_ridge_pairing, remove_invalid_pairs, hessian_ridge_orientation
 from .report_utils import render_hillshaded_dtm, save_figure, style_axes, pair_to_geo
 from . import config as cfg
+import parameters
 
 
 _STEP_LABELS = [
@@ -112,9 +113,9 @@ def generate_pipeline_figure(coord: dict, dtm_path: str, output_dir: Path) -> No
     pairs = remove_invalid_pairs(pairs, angle_tolerance=cfg.ANGLE_TOLERANCE,
                                   target_angle=cfg.TARGET_ANGLE)
 
-    # ── Build figure ──────────────────────────────────────────────────────────
+    # ── Build figure  (2 rows × 6 columns) ───────────────────────────────────
     print(f"  [pipeline] composing figure …")
-    fig, axes = plt.subplots(2, 5, figsize=(22, 9))
+    fig, axes = plt.subplots(2, 6, figsize=(26, 9))
     fig.patch.set_facecolor("#1a1a1a")
     fig.suptitle(
         f"LiDAR Processing Pipeline  ·  {name.replace('_', ' ')}  "
@@ -124,65 +125,123 @@ def generate_pipeline_figure(coord: dict, dtm_path: str, output_dir: Path) -> No
 
     hs_raw = render_hillshaded_dtm(raw, nodata=nodata, azimuth=315)
     hs_smooth = render_hillshaded_dtm(smoothed, nodata=nodata, azimuth=315)
-
     lrm_disp = np.where(lrm == nodata, np.nan, lrm)
     svf_disp = svf.astype(float)
-    # NaN (nodata) stays NaN — imshow renders it as the axes background
 
-    # Row 1
-    axes[0, 0].imshow(hs_raw, origin="upper", extent=ext, aspect="auto")
-    style_axes(axes[0, 0], _STEP_LABELS[0])
+    # Hessian orientation & angle-deviation maps (computed once, used in row 1 & 2)
+    orient_rad = hessian_ridge_orientation(valid_ridge, sigma=parameters.HESSIAN_SIGMA)
+    orient_deg = np.rad2deg(orient_rad)                        # [0, 180)
+    ridge_present = valid_ridge > cfg.RIDGE_THRESHOLD * 0.05
+    orient_disp = np.where(ridge_present, orient_deg, np.nan)
+
+    target_rad = np.deg2rad(cfg.TARGET_ANGLE)
+    diff_rad = np.abs(orient_rad - target_rad)
+    diff_rad = np.minimum(diff_rad, np.pi - diff_rad)
+    diff_disp = np.where(ridge_present, np.rad2deg(diff_rad), np.nan)
+
+    def _cb(ax, im, **kw):
+        cb = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.03, **kw)
+        cb.ax.yaxis.set_tick_params(colors="gray", labelsize=6)
+        return cb
+
+    # ── Row 1: pre-processing + Hessian orientation ───────────────────────────
+    axes[0, 0].imshow(hs_raw,    origin="upper", extent=ext, aspect="auto")
+    style_axes(axes[0, 0], "① Raw DTM")
     axes[0, 0].set_xticks([]); axes[0, 0].set_yticks([])
 
     axes[0, 1].imshow(hs_smooth, origin="upper", extent=ext, aspect="auto")
-    style_axes(axes[0, 1], _STEP_LABELS[1])
+    style_axes(axes[0, 1], "② Median Smooth")
     axes[0, 1].set_xticks([]); axes[0, 1].set_yticks([])
 
-    im_lrm = axes[0, 2].imshow(lrm_disp, origin="upper", cmap="RdBu_r",
-                                 extent=ext, aspect="auto")
-    fig.colorbar(im_lrm, ax=axes[0, 2], fraction=0.046, pad=0.03).ax.yaxis.set_tick_params(colors="gray", labelsize=6)
-    style_axes(axes[0, 2], _STEP_LABELS[2])
+    _cb(axes[0, 2], axes[0, 2].imshow(lrm_disp, origin="upper", cmap="RdBu_r",
+                                       extent=ext, aspect="auto"))
+    style_axes(axes[0, 2], "③ Local Relief Model")
     axes[0, 2].set_xticks([]); axes[0, 2].set_yticks([])
 
     ridge_disp = np.where(ridge == nodata, np.nan, ridge)
-    im_ridge = axes[0, 3].imshow(ridge_disp, origin="upper", cmap="hot",
-                                   extent=ext, aspect="auto")
-    fig.colorbar(im_ridge, ax=axes[0, 3], fraction=0.046, pad=0.03).ax.yaxis.set_tick_params(colors="gray", labelsize=6)
+    _cb(axes[0, 3], axes[0, 3].imshow(ridge_disp, origin="upper", cmap="hot",
+                                       extent=ext, aspect="auto"))
     style_axes(axes[0, 3], "④ Frangi Ridge Response")
     axes[0, 3].set_xticks([]); axes[0, 3].set_yticks([])
 
-    im_svf = axes[0, 4].imshow(svf_disp, origin="upper", cmap="gray",
-                                 extent=ext, aspect="auto")
-    fig.colorbar(im_svf, ax=axes[0, 4], fraction=0.046, pad=0.03).ax.yaxis.set_tick_params(colors="gray", labelsize=6)
-    style_axes(axes[0, 4], _STEP_LABELS[4])
+    _cb(axes[0, 4], axes[0, 4].imshow(svf_disp, origin="upper", cmap="gray",
+                                       extent=ext, aspect="auto"))
+    style_axes(axes[0, 4], "⑤ Sky-View Factor")
     axes[0, 4].set_xticks([]); axes[0, 4].set_yticks([])
 
-    # Row 2
+    cb_ori = _cb(axes[0, 5], axes[0, 5].imshow(orient_disp, origin="upper", cmap="hsv",
+                                                 vmin=0, vmax=180, extent=ext, aspect="auto"))
+    cb_ori.ax.axhline(cfg.TARGET_ANGLE, color="cyan", linewidth=1.2, linestyle="--")
+    cb_ori.ax.annotate(f"{cfg.TARGET_ANGLE:.0f}°", xy=(1.05, cfg.TARGET_ANGLE),
+                       xycoords=("axes fraction", "data"), fontsize=5, color="cyan", va="center")
+    style_axes(axes[0, 5], f"⑥ Hessian Orientation  (target {cfg.TARGET_ANGLE:.0f}°)")
+    axes[0, 5].set_xticks([]); axes[0, 5].set_yticks([])
+
+    # ── Row 2: detection pipeline ─────────────────────────────────────────────
+    cb_diff = _cb(axes[1, 0], axes[1, 0].imshow(diff_disp, origin="upper", cmap="RdYlGn_r",
+                                                  vmin=0, vmax=90, extent=ext, aspect="auto"))
+    cb_diff.ax.axhline(cfg.ANGLE_TOLERANCE, color="cyan", linewidth=1.2, linestyle="--")
+    cb_diff.ax.annotate(f"±{cfg.ANGLE_TOLERANCE:.0f}°", xy=(1.05, cfg.ANGLE_TOLERANCE),
+                        xycoords=("axes fraction", "data"), fontsize=5, color="cyan", va="center")
+    style_axes(axes[1, 0], f"⑦ Angle Deviation  (tol ±{cfg.ANGLE_TOLERANCE:.0f}°)")
+    axes[1, 0].set_xticks([]); axes[1, 0].set_yticks([])
+
+    ridge_thresh_disp = np.where(nd_mask, np.nan, valid_ridge)
+    cb_rt = _cb(axes[1, 1], axes[1, 1].imshow(ridge_thresh_disp, origin="upper", cmap="hot",
+                                                extent=ext, aspect="auto"))
+    cb_rt.ax.axhline(cfg.RIDGE_THRESHOLD, color="cyan", linewidth=1.5, linestyle="--")
+    cb_rt.ax.annotate(f"t={cfg.RIDGE_THRESHOLD}", xy=(1.05, cfg.RIDGE_THRESHOLD),
+                      xycoords=("axes fraction", "data"), fontsize=5, color="cyan", va="center")
+    style_axes(axes[1, 1], f"⑧ Ridge Response  (t={cfg.RIDGE_THRESHOLD})")
+    axes[1, 1].set_xticks([]); axes[1, 1].set_yticks([])
+
     labeled_disp = labeled.astype(float)
     labeled_disp[labeled == 0] = np.nan
-    im_lab = axes[1, 0].imshow(labeled_disp, origin="upper", cmap="tab20",
-                                extent=ext, aspect="auto", interpolation="nearest")
-    fig.colorbar(im_lab, ax=axes[1, 0], fraction=0.046, pad=0.03).ax.yaxis.set_tick_params(colors="gray", labelsize=6)
-    n_components = labeled.max()
-    style_axes(axes[1, 0], f"⑥ Labeled Components  ({n_components})")
-    axes[1, 0].set_xticks([]); axes[1, 0].set_yticks([])
-    _img(axes[1, 1], binary.astype(np.uint8), "⑦ Ridge Threshold", cmap="gray", extent=ext)
-    _img(axes[1, 2], closed.astype(np.uint8), _STEP_LABELS[7], cmap="gray", extent=ext)
-    _img(axes[1, 3], skeleton.astype(np.uint8), _STEP_LABELS[8], cmap="gray", extent=ext)
+    _cb(axes[1, 2], axes[1, 2].imshow(labeled_disp, origin="upper", cmap="tab20",
+                                       extent=ext, aspect="auto", interpolation="nearest"))
+    style_axes(axes[1, 2], f"⑨ Labeled Components  ({labeled.max()})")
+    axes[1, 2].set_xticks([]); axes[1, 2].set_yticks([])
 
-    # Panel ⑩ — pairs on hillshaded DTM
-    axes[1, 4].imshow(hs_raw, origin="upper", extent=ext, aspect="auto")
+    _img(axes[1, 3], closed.astype(np.uint8),   "⑩ Hough Reconstruction",  cmap="gray", extent=ext)
+    _img(axes[1, 4], skeleton.astype(np.uint8), "⑪ Skeleton",     cmap="gray", extent=ext)
+
+    # Panel ⑫ — pairs on hillshaded DTM
+    axes[1, 5].imshow(hs_raw, origin="upper", extent=ext, aspect="auto")
     COLORS = ["#ff4444", "#4499ff"]
+
+    # Pixel → metres conversion at the window centre latitude
+    rows_n, cols_n = raw.shape
+    centre_lat = (extent[2] + extent[3]) / 2
+    m_per_px = ((extent[1] - extent[0]) / cols_n * 111_320.0
+                * np.cos(np.radians(centre_lat))
+                + (extent[3] - extent[2]) / rows_n * 111_320.0) / 2
+
     for pair in pairs[:12]:
-        for k, geo_seg in enumerate(pair_to_geo(pair, extent, raw.shape)):
-            (gx0, gy0), (gx1, gy1) = geo_seg
-            axes[1, 4].plot([gx0, gx1], [gy0, gy1],
+        geo_segs = pair_to_geo(pair, extent, raw.shape)
+        for k, ((gx0, gy0), (gx1, gy1)) in enumerate(geo_segs):
+            axes[1, 5].plot([gx0, gx1], [gy0, gy1],
                             color=COLORS[k], linewidth=2.0, alpha=0.85)
-    style_axes(
-        axes[1, 4],
-        f"{_STEP_LABELS[9]}  ({len(pairs)} pair{'s' if len(pairs) != 1 else ''})",
-    )
-    axes[1, 4].set_xticks([]); axes[1, 4].set_yticks([])
+
+        # Spacing label at the midpoint between the two line midpoints
+        (ax0, ay0), (ax1, ay1) = geo_segs[0]
+        (bx0, by0), (bx1, by1) = geo_segs[1]
+        mid_ax, mid_ay = (ax0 + ax1) / 2, (ay0 + ay1) / 2
+        mid_bx, mid_by = (bx0 + bx1) / 2, (by0 + by1) / 2
+        label_lon = (mid_ax + mid_bx) / 2
+        label_lat = (mid_ay + mid_by) / 2
+        spacing_m = pair["spacing"] * m_per_px
+        axes[1, 5].annotate(
+            f"{spacing_m:.0f} m",
+            xy=(label_lon, label_lat),
+            fontsize=6.5, color="white", fontweight="bold",
+            ha="center", va="center",
+            bbox=dict(boxstyle="round,pad=0.15", facecolor="#000000",
+                      alpha=0.6, edgecolor="none"),
+        )
+
+    style_axes(axes[1, 5],
+               f"⑫ Detected Pairs  ({len(pairs)} pair{'s' if len(pairs) != 1 else ''})")
+    axes[1, 5].set_xticks([]); axes[1, 5].set_yticks([])
 
     # Uniform dark frame
     for ax_row in axes:

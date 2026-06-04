@@ -47,40 +47,20 @@ def main(AREA="Hart_Island", n_splits=10) -> list[str]:
     output_dir.mkdir(exist_ok=True)
     polygons = get_polygons(AREA, n_splits=n_splits)
     created: list[str] = []
-    metadata = None
-    if AREA in ["Hopewell_Road", "Circleville_Road"]:
-        for i in range(n_splits):
-            wkt = array_to_wkt_string(polygons[f"{AREA}_{i}"])
-            for _ in range(10):
-                try:
-                    metadata = query_polygon(wkt)[0]
-                    break
-                except Exception as e:
-                    print(f"Error fetching data: {e}. Retrying...")
-            if metadata:
-                with open(output_dir / f"{AREA}_{i}.json", "w") as f:
-                    json.dump(metadata, f)
-                created.append(f"{AREA}_{i}")
-    else:
-        wkt = array_to_wkt_string(polygons[AREA])
+    for i in range(n_splits):
+        area_temp = f"{AREA}_{i}"
+        wkt = array_to_wkt_string(polygons[area_temp])
+        metadata = None
         for _ in range(10):
             try:
                 metadata = query_polygon(wkt)[0]
                 break
             except Exception as e:
-                print(f"Error fetching data: {e}. Retrying...")
-        if AREA == "Hart_Island":
-            for year in [2014, 2015, 2021, 2023]:
-                metadata_year = [t for t in metadata if str(year) in t["flight_date"]] if metadata else []
-                if metadata_year:
-                    with open(output_dir / f"{AREA}_{year}.json", "w") as f:
-                        json.dump(metadata_year, f)
-                    created.append(f"{AREA}_{year}")
-        else:
-            if metadata:
-                with open(output_dir / f"{AREA}.json", "w") as f:
-                    json.dump(metadata, f)
-                created.append(AREA)
+                print(f"Error fetching data for {area_temp}: {e}. Retrying...")
+        if metadata:
+            with open(output_dir / f"{area_temp}.json", "w") as f:
+                json.dump(metadata, f)
+            created.append(area_temp)
     return created
 
 if __name__ == "__main__":

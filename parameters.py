@@ -175,7 +175,7 @@ degrees from TARGET_ANGLE are excluded from the binary ridge mask."""
 
 # ── Binary thresholding & morphology ─────────────────────────────────────────
 
-RIDGE_THRESHOLD: float = .01
+RIDGE_THRESHOLD: float = .1
 """Minimum LRM elevation (metres above local mean surface) to include a pixel
 in the binary ridge mask.  Lower → more candidates, more false positives."""
 
@@ -187,6 +187,16 @@ BINARY_MIN_OBJECT_SIZE: int = 200
 """Connected components with fewer than this many pixels are removed before
 skeletonisation (remove_small_objects).  Filters isolated speckle."""
 
+WALL_GAP_WINDOW_RATIO: float = 2
+"""Along-wall integration window half-length as a fraction of MIN_RIDGE_LENGTH_METERS.
+window_px = WALL_GAP_WINDOW_RATIO × MIN_RIDGE_LENGTH_METERS × 2 + 1.
+Larger values bridge wider orthogonal cuts; raise to 2–4 for frequent cuts."""
+
+WALL_FILL_THRESHOLD: float = 0.1
+"""Minimum along-wall pixel density (0–1) required to fill a gap.
+0.3 = a gap pixel is recovered if ≥30 % of its along-wall window contains
+wall evidence.  Lower → more aggressive gap filling; raise to tighten."""
+
 # ── Line fitting & parallel-pair matching ─────────────────────────────────────
 
 MIN_RIDGE_LENGTH_METERS: float = 15.0
@@ -197,7 +207,7 @@ PAIRING_ANGLE_TOLERANCE_DEG: float = 5.0
 """Maximum angular difference (degrees) between two fitted lines to be
 considered a parallel pair.  Very tight — ensures truly parallel walls."""
 
-SPACING_TOLERANCE: float = 0.20
+SPACING_TOLERANCE: float = 0.15
 """Relative tolerance on the wall-to-wall spacing, e.g. 0.20 = ±20 %.
 A detected pair whose spacing deviates more than this from SPACING_METERS
 is rejected."""

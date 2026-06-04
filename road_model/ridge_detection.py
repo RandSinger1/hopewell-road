@@ -33,6 +33,25 @@ def hessian_ridge_orientation(image, sigma=1.0):
     return orient.astype(np.float32)
 
 
+def _oriented_line_se(length: int, angle_deg: float) -> np.ndarray:
+    """
+    Build a binary line structuring element of the given pixel length,
+    oriented at angle_deg (degrees CCW from +x, image convention: y down).
+    Used for directional morphological closing to bridge wall gaps without
+    merging cross-cutting landscape features.
+    """
+    size = length | 1          # ensure odd
+    half = size // 2
+    se = np.zeros((size, size), dtype=bool)
+    rad = np.deg2rad(angle_deg)
+    for t in np.linspace(-half, half, size * 4):
+        col = int(round(half + t * np.cos(rad)))
+        row = int(round(half - t * np.sin(rad)))  # y-flip: image y increases downward
+        if 0 <= row < size and 0 <= col < size:
+            se[row, col] = True
+    return se
+
+
 def detect_parallel_walls_ridge_pairing(
     ridge_map,
     target_angle,               # degrees CCW from +x, 0 = horizontal
@@ -45,6 +64,7 @@ def detect_parallel_walls_ridge_pairing(
     overlap_ratio,
     orientation_source=None,    # DTM to use for orientation; defaults to ridge_map
     return_debug=False,
+    gap_fill=True,              # False = skip along-wall integration (faster for scans)
 ):
     """
     Robust parallel‑wall detection from a ridge probability map.
@@ -67,30 +87,44 @@ def detect_parallel_walls_ridge_pairing(
     spacing_px = convert_meters_degrees_pixels(METERS, PIXELS, spacing_meters, 0, ridge_map, extent)[0]
     min_ridge_length_px = convert_meters_degrees_pixels(METERS, PIXELS, min_ridge_length_meters, 0, ridge_map, extent)[0]
 
-    # ---------- 1. Orientation mask ----------
+    # ---------- 1. Orientation weighting ----------
     orient_source = orientation_source if orientation_source is not None else ridge_map
     orient_rad = hessian_ridge_orientation(orient_source, sigma=parameters.HESSIAN_SIGMA)
     target_rad = np.deg2rad(target_angle)
     angle_diff = np.abs(orient_rad - target_rad)
     angle_diff = np.minimum(angle_diff, np.pi - angle_diff)  # modulo π
-    orientation_mask = (angle_diff < np.deg2rad(angle_tolerance)) & np.isfinite(orient_rad)
 
-    # (Optional: print diagnostics – uncomment if needed)
-    # valid = np.isfinite(orient_rad)
-    # print(f"Min angle: {np.rad2deg(orient_rad[valid]).min():.1f}°, Max: {np.rad2deg(orient_rad[valid]).max():.1f}°")
-    # ...
+    orientation_mask = (angle_diff < np.deg2rad(angle_tolerance)) & np.isfinite(orient_rad)
 
     # ---------- 2. Threshold & create binary mask ----------
     binary = (ridge_map > ridge_threshold) & orientation_mask
-    # Use `max_size` to match the newer skimage API (avoid FutureWarning).
-    # The previous `min_size` behaviour removed objects smaller than `min_size`.
-    # The new `max_size` removes objects smaller than or equal to the value,
-    # so subtract 1 to preserve the original semantics.
     binary = remove_small_objects(binary, max_size=parameters.BINARY_MIN_OBJECT_SIZE - 1, connectivity=2)
 
-    # ---------- 3. Robust skeletonization (works for all angles) ----------
-    # `binary_closing` moved; use `closing` from skimage.morphology instead
-    binary_closed = closing(binary, footprint=disk(parameters.MORPH_DISK_RADIUS))
+    if not binary.any():
+        if return_debug:
+            return [], (binary, binary, np.zeros_like(binary, dtype=bool),
+                        np.zeros_like(binary, dtype=int), orientation_mask)
+        return []
+
+    # ---------- 3. Along-wall gap filling ----------
+    if gap_fill:
+        from scipy.ndimage import uniform_filter1d
+        from scipy.ndimage import rotate as _nd_rotate
+
+        along_wall_image_angle = (target_angle + 90) % 180
+        window_px = max(7, int(min_ridge_length_px * parameters.WALL_GAP_WINDOW_RATIO) * 2 + 1)
+
+        b_rot  = _nd_rotate(binary.astype(np.float32), along_wall_image_angle,
+                            reshape=False, order=1, cval=0.0)
+        b_int  = uniform_filter1d(b_rot, size=window_px, axis=1, mode='constant', cval=0.0)
+        b_back = _nd_rotate(b_int, -along_wall_image_angle,
+                            reshape=False, order=1, cval=0.0)
+        binary_closed = b_back > parameters.WALL_FILL_THRESHOLD
+        if not binary_closed.any():
+            binary_closed = binary
+    else:
+        binary_closed = binary
+
     skeleton = medial_axis(binary_closed, return_distance=False)
 
     # ---------- 4. Fit a straight line to each connected component ----------
@@ -158,7 +192,10 @@ def detect_parallel_walls_ridge_pairing(
                 continue
 
             # Overlap along average direction
-            avg_dir = (dir1 + dir2) / np.linalg.norm(dir1 + dir2)
+            # Align dir2 to the same half-plane as dir1 before averaging;
+            # cv2.fitLine can return either direction along the same line.
+            d2 = dir2 if np.dot(dir1, dir2) >= 0 else -dir2
+            avg_dir = (dir1 + d2) / np.linalg.norm(dir1 + d2)
             t1_vals = [np.dot(np.array(p) - mid1, avg_dir) for p in l1]
             t2_vals = [np.dot(np.array(p) - mid1, avg_dir) for p in l2]
             overlap = max(0.0, min(max(t1_vals), max(t2_vals)) - max(min(t1_vals), min(t2_vals)))
@@ -297,8 +334,8 @@ def search_region(filepath: str, coordinates: tuple[float, float], size_x_meters
         ridge_threshold=parameters.RIDGE_THRESHOLD,
         min_ridge_length_meters=parameters.MIN_RIDGE_LENGTH_METERS,
         overlap_ratio=parameters.OVERLAP_RATIO,
-        # orientation_source=lrm,
         return_debug=False,
+        gap_fill=False,
     )
     if verbose > 0: print(f"Found {len(pairs)} parallel wall pairs.")
 
