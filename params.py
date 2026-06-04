@@ -189,7 +189,7 @@ skeletonisation (remove_small_objects).  Filters isolated speckle."""
 
 # ── Line fitting & parallel-pair matching ─────────────────────────────────────
 
-MIN_RIDGE_LENGTH_METERS: float = 25.0
+MIN_RIDGE_LENGTH_METERS: float = 15.0
 """Skeleton components shorter than this (metres) are discarded before
 straight-line fitting.  Suppresses short, wandering fragments."""
 
@@ -352,23 +352,55 @@ REPORT_COORDS: list = [
     {
         "name": "Route 40",
         "lat":   39.9, "lon": -82.5, "size_m": 200,
-        "note": "Proposed route, very probable",
+        "note": "Proposed route",
     },
     {
-        "name": "Route 30",
-        "lat":   39.7, "lon": -82.6, "size_m": 200,
-        "note": "Proposed route, less certain",
+        "name": "Beaver Run",
+        "lat":   39.9, "lon": -82.5, "size_m": 200,
+        "note": "Proposed route"
     },
     {
-        "name": "Woodlot",
+        "name": "Blacklick Eastern",
+        "lat": 39.9, "lon": -82.5, "size_m": 200,
+        "note": "Proposed route"
+    },
+    {
+        "name": "Route 159",
+        "lat": 39.4, "lon": -82.9, "size_m": 200,
+        "note": "Not visible, but worth checking out"
+    },
+    {
+        "name": "Canal Rd",
         "lat":   39.8, "lon": -82.5, "size_m": 200,
-        "note": "Probably irrigation feature",
-    },
-    {
-        "name": "Route 33",
-        "lat":   39.9, "lon": -82.8, "size_m": 200,
-        "note": "Very confident, possibly new discovery",
-    },
+        "note": "Proposed route"
+    }
+    # {
+    #     "name": "Examine Later",
+    #     "lat": 39.6, "lon": -82.7, "size_m": 200,
+    #     "note": "Too much tree cover.  Second pass"
+    # },
+    # {
+    #     "name": "Examine Later 2",
+    #     "lat": 39.5, "lon": -82.8, "size_m": 200,
+    #     "note": "Too much tree cover.  Second pass"
+    # },
+    
+    # {
+    #     "name": "Route 33",
+    #     "lat":   39.7, "lon": -82.6, "size_m": 200,
+    #     "note": "Proposed route",
+    # },
+    # {
+    #     "name": "Woodlot",
+    #     "lat":   39.8, "lon": -82.5, "size_m": 200,
+    #     "note": "Probably irrigation feature",
+    # },
+    # {
+    #     "name": "Route 33",
+    #     "lat":   39.9, "lon": -82.8, "size_m": 200,
+    #     "note": "Very confident, possibly new discovery",
+    # },
+    
 ]
 """Coordinates to include in the report.  Add entries here to process
 additional sites without touching any other file."""
