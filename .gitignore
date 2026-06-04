@@ -13,3 +13,4 @@ locations
 app/.dtm_cache
 .claude
 *.docx
+*.pdf
