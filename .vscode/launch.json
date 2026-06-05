@@ -1,0 +1,111 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "App: Map Viewer Server",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "app.server",
+            "args": [
+                "--folder", "data/locations",
+                "--dtm", "data/loaded_tiles/Whole_Road/merged_dtm.tif"
+            ],
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "justMyCode": false
+        },
+        {
+            "name": "LiDAR: Generate Circleville Road DTM",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "lidar.run_pipeline",
+            "args": [
+                "Circleville_Road",
+                "--area-splits", "10",
+                "--pdal-workers", "10",
+                "--skip-download",
+                "--skip-collect",
+                "--skip-merge"
+            ],
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "justMyCode": false
+        },
+        {
+            "name": "LiDAR: Generate Full Road DTM",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "lidar.run_pipeline",
+            "args": [
+                "full_road",
+                "--area-splits", "30"
+            ],
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "justMyCode": false
+        },
+        {
+            "name": "LiDAR: Generate Hart Island DTM",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "lidar.run_pipeline",
+            "args": [
+                "Hart_Island",
+                "--separate-year"
+            ],
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "justMyCode": false
+        },
+        {
+            "name": "Road Model: Ridge Detection + Road Modeler",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "road_model.road_modeler",
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "justMyCode": false
+        },
+        {
+            "name": "Road Model: Range Searcher",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "road_model.range_searcher",
+            "args": ["--max_workers", "4"],
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "justMyCode": false
+        },
+        {
+            "name": "Report: Generate Figures",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "report.run_report",
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "justMyCode": false
+        },
+        {
+            "name": "Report: Generate DOCX",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "report.generate_report_doc",
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "justMyCode": false
+        },
+        {
+            "name": "Quick View: DTM",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "lidar.quick_view",
+            "args": [
+                "--input", "data/loaded_tiles/Hart_Island_2023/merged_dtm.tif",
+                "--step", "10"
+            ],
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "justMyCode": false
+        }
+    ]
+}
