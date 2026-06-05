@@ -60,7 +60,6 @@ def main() -> None:
         import traceback
         print(f"  [ERROR] overview_map: {exc}")
         traceback.print_exc()
-    # todo: test with just route_40
     for coord in cfg.REPORT_COORDS:
         name = coord["name"]
         t0 = time.time()

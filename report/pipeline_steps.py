@@ -9,14 +9,16 @@ Row 1 — Pre-processing
   [2] Median-smoothed DTM
   [3] Local Relief Model (LRM)
   [4] Multi-scale Frangi ridge response
-  [5] Sky-View Factor
+  [5] Hessian Orientation
+  [6] Hillshade perpendicular to 32°
 
 Row 2 — Detection
-  [6] Binary ridge threshold
-  [7] Morphological closing
-  [8] Medial-axis skeleton
+  [7] Angle deviation map
+  [8] Ridge threshold
   [9] Labelled skeleton components
-  [10] Detected parallel wall pairs
+  [10] Hough reconstruction
+  [11] Skeleton
+  [12] Detected parallel wall pairs
 
 Call generate_pipeline_figure(coord, dtm_path, output_dir) from run_report.py.
 """
@@ -28,11 +30,11 @@ import matplotlib.pyplot as plt
 
 from road_model.process_dtm import (
     getGTAndBand, get_window,
-    median_smooth_windowed, local_relief_model, sky_view_factor_xr,
+    median_smooth_windowed, local_relief_model,
     multiscale_ridge_enhancement,
 )
 from road_model.ridge_detection import detect_parallel_walls_ridge_pairing, remove_invalid_pairs, hessian_ridge_orientation
-from .report_utils import render_hillshaded_dtm, save_figure, style_axes, pair_to_geo
+from .report_utils import render_hillshaded_dtm, hillshade, save_figure, style_axes, pair_to_geo
 from . import config as cfg
 import parameters
 
@@ -41,13 +43,15 @@ _STEP_LABELS = [
     "① Raw DTM",
     "② Median Smooth",
     "③ Local Relief Model",
-    "④ LRM (detection input)",
-    "⑤ Sky-View Factor",
-    "⑥ Local Relief Model",
-    "⑦ LRM Threshold",
-    "⑧ Morph Close",
-    "⑨ Skeleton",
-    "⑩ Line Detection",
+    "④ Frangi Ridge Response",
+    "⑤ Hessian Orientation",
+    "⑥ Hillshade ⊥ 32°",
+    "⑦ Angle Deviation",
+    "⑧ Ridge Response",
+    "⑨ Labeled Components",
+    "⑩ Hough Reconstruction",
+    "⑪ Skeleton",
+    "⑫ Detected Pairs",
 ]
 
 
@@ -90,7 +94,6 @@ def generate_pipeline_figure(coord: dict, dtm_path: str, output_dir: Path) -> No
     smoothed = median_smooth_windowed(raw, nodata=nodata, radius=cfg.MEDIAN_SMOOTH_RADIUS)
     lrm = local_relief_model(smoothed, radius=cfg.LRM_RADIUS, nodata=nodata)
     ridge = multiscale_ridge_enhancement(lrm, scales=cfg.RIDGE_SCALES, nodata=nodata)
-    svf = sky_view_factor_xr(smoothed, radius=15, directions=16, nodata=nodata)
 
     # ── Detection ─────────────────────────────────────────────────────────────
     print(f"  [pipeline] detection steps …")
@@ -126,7 +129,8 @@ def generate_pipeline_figure(coord: dict, dtm_path: str, output_dir: Path) -> No
     hs_raw = render_hillshaded_dtm(raw, nodata=nodata, azimuth=315)
     hs_smooth = render_hillshaded_dtm(smoothed, nodata=nodata, azimuth=315)
     lrm_disp = np.where(lrm == nodata, np.nan, lrm)
-    svf_disp = svf.astype(float)
+    # Intense hillshade perpendicular to 32° (azimuth 122°), low sun angle for maximum contrast
+    hs_perp32 = hillshade(smoothed, nodata=nodata, azimuth=122.0, altitude=20.0, z_factor=4.0)
 
     # Hessian orientation & angle-deviation maps (computed once, used in row 1 & 2)
     orient_rad = hessian_ridge_orientation(valid_ridge, sigma=parameters.HESSIAN_SIGMA)
@@ -164,17 +168,17 @@ def generate_pipeline_figure(coord: dict, dtm_path: str, output_dir: Path) -> No
     style_axes(axes[0, 3], "④ Frangi Ridge Response")
     axes[0, 3].set_xticks([]); axes[0, 3].set_yticks([])
 
-    _cb(axes[0, 4], axes[0, 4].imshow(svf_disp, origin="upper", cmap="gray",
-                                       extent=ext, aspect="auto"))
-    style_axes(axes[0, 4], "⑤ Sky-View Factor")
-    axes[0, 4].set_xticks([]); axes[0, 4].set_yticks([])
-
-    cb_ori = _cb(axes[0, 5], axes[0, 5].imshow(orient_disp, origin="upper", cmap="hsv",
+    cb_ori = _cb(axes[0, 4], axes[0, 4].imshow(orient_disp, origin="upper", cmap="hsv",
                                                  vmin=0, vmax=180, extent=ext, aspect="auto"))
     cb_ori.ax.axhline(cfg.TARGET_ANGLE, color="cyan", linewidth=1.2, linestyle="--")
     cb_ori.ax.annotate(f"{cfg.TARGET_ANGLE:.0f}°", xy=(1.05, cfg.TARGET_ANGLE),
                        xycoords=("axes fraction", "data"), fontsize=5, color="cyan", va="center")
-    style_axes(axes[0, 5], f"⑥ Hessian Orientation  (target {cfg.TARGET_ANGLE:.0f}°)")
+    style_axes(axes[0, 4], f"⑤ Hessian Orientation  (target {cfg.TARGET_ANGLE:.0f}°)")
+    axes[0, 4].set_xticks([]); axes[0, 4].set_yticks([])
+
+    axes[0, 5].imshow(hs_perp32, origin="upper", cmap="gray", extent=ext, aspect="auto",
+                      vmin=0, vmax=1)
+    style_axes(axes[0, 5], "⑥ Hillshade ⊥ 32°  (az 122°, alt 20°)")
     axes[0, 5].set_xticks([]); axes[0, 5].set_yticks([])
 
     # ── Row 2: detection pipeline ─────────────────────────────────────────────

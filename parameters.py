@@ -207,7 +207,7 @@ PAIRING_ANGLE_TOLERANCE_DEG: float = 5.0
 """Maximum angular difference (degrees) between two fitted lines to be
 considered a parallel pair.  Very tight — ensures truly parallel walls."""
 
-SPACING_TOLERANCE: float = 0.15
+SPACING_TOLERANCE: float = 0.4
 """Relative tolerance on the wall-to-wall spacing, e.g. 0.20 = ±20 %.
 A detected pair whose spacing deviates more than this from SPACING_METERS
 is rejected."""
