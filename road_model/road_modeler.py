@@ -315,33 +315,3 @@ def detect_parallel_walls_template(
         })
 
     return peaks, best_ncc
-
-if __name__ == "__main__":
-    gt, band, nodata, ds = getGTAndBand("data/loaded_tiles/Hopewell_Road/merged_dtm.tif")
-
-    window, extent = get_window(40.0, -82.4, 200, 200, gt, band, nodata)
-    for r in [10]:
-        print(f"Filtering DTM with median smoothing radius = {r} …")
-        window, extent, cmap, label = filter_image(
-            window,
-            extent,
-            ridge=True,
-            ridge_scales=[5, 6, 7],
-            nodata=nodata,
-            median_smoothing=True,
-            smoothing_radius=r,
-        )
-        print("Detecting parallel walls using template matching …")
-        peaks, best_ncc = detect_parallel_walls_template(
-            -1 * window,
-            extent
-        )
-        print(f"Found {len(peaks)} peaks.")
-        displayWindow(
-            window,
-            extent,
-            cmap,
-            label,
-            peaks=peaks,
-            title=f"Hopewell Road DTM (median smoothing radius = {r})"
-        )

@@ -317,19 +317,3 @@ def multiscale_ridge_enhancement(data, scales=None, nodata=parameters.NODATA):
 
     ridge_all[mask] = nodata
     return ridge_all
-def main():
-    filepath = 'data/loaded_tiles/Hopewell_Road/merged_dtm.tif'
-    gt, band, nodata, ds = getGTAndBand(filepath)
-    window, extent = get_window(40.0, -82.4, 200, 200, gt, band, nodata)
-    processed_window, extent, cmap, label = filter_image(
-        window,
-        extent,
-        nodata=nodata,
-        ridge=True,
-        ridge_scales=[5, 6, 7],
-        median_smoothing=True,
-        title="Circleville Road - Local Relief Model"
-    )
-    displayWindow(processed_window, extent, cmap=cmap, label=label)
-if __name__ == "__main__":
-    main()

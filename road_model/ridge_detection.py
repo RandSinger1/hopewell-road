@@ -401,10 +401,3 @@ def search_region(filepath: str, coordinates: tuple[float, float], size_x_meters
             picture = picture
         )
     print(f'Searched {size_x_meters}m x {size_y_meters}m region at {coordinates[0]}, {coordinates[1]}')
-def main():
-    walls = (40.0,-82.4)
-    weird_thing = (40.0, -82.4)
-    search_region("data/loaded_tiles/Hopewell_Road/merged_dtm.tif", walls, 200, 200, Path("data/locations"), picture=False)
-
-if __name__ == "__main__":
-    main()
