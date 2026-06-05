@@ -193,7 +193,21 @@ def warp_to_4326_auto(input_tiles, output_tif,
     return output_tif
 
 
-def process_tiles(AREA):
+def _classify_tile(laz_path: Path, out_path: Path) -> None:
+    """Ground-classify one LAZ tile. Top-level so it is picklable by ProcessPoolExecutor."""
+    if out_path.exists() and out_path.stat().st_size > 0:
+        return
+    pdal.Pipeline(make_pipeline(str(laz_path), str(out_path))).execute()
+
+
+def _rasterize_tile(ground_file: Path, dtm_out: Path) -> None:
+    """Rasterise one ground-classified LAZ to a DTM GeoTIFF. Top-level for pickling."""
+    if dtm_out.exists() and dtm_out.stat().st_size > 0:
+        return
+    pdal.Pipeline(make_dtm_pipeline(str(ground_file), str(dtm_out))).execute()
+
+
+def process_tiles(AREA: str, max_workers: int = 4) -> None:
     INPUT_DIR = Path(f"data/loaded_tiles/{AREA}")
     RAW_DIR = INPUT_DIR / "raw_tiles"
     GROUND_DIR = INPUT_DIR / "ground_tiles"
@@ -202,24 +216,39 @@ def process_tiles(AREA):
     DTM_DIR.mkdir(parents=True, exist_ok=True)
 
     laz_files = sorted(RAW_DIR.glob("*.laz"))
-    for i, laz_path in enumerate(laz_files):
-        out_path = GROUND_DIR / f"{laz_path.stem}_ground.laz"
-        if out_path.exists() and out_path.stat().st_size > 0:
-            continue
-        if VERBOSE > 0:
-            print(f"[{i}/{len(laz_files)}] Processing {laz_path.name} …")
-        pipeline_json = make_pipeline(str(laz_path), str(out_path))
-        pipe = pdal.Pipeline(pipeline_json)
-        pipe.execute()
+    print(f"[{AREA}] Classifying {len(laz_files)} tiles ({max_workers} workers) …")
+    with ProcessPoolExecutor(max_workers=max_workers) as executor:
+        futures = {
+            executor.submit(_classify_tile, laz, GROUND_DIR / f"{laz.stem}_ground.laz"): laz.name
+            for laz in laz_files
+        }
+        for future in as_completed(futures):
+            name = futures[future]
+            try:
+                future.result()
+                if VERBOSE > 0:
+                    print(f"  [{AREA}] classified {name}")
+            except Exception as exc:
+                print(f"  [{AREA}] ERROR classifying {name}: {exc}")
 
-    for i, ground_file in enumerate(sorted(GROUND_DIR.glob("*.laz"))):
-        dtm_out = DTM_DIR / f"{ground_file.stem.replace('_ground', '')}_dtm.tif"
-        if dtm_out.exists() and dtm_out.stat().st_size > 0:
-            continue
-        if VERBOSE > 0:
-            print(f"[{i}] Generating DTM for {ground_file.name} …")
-        dtm_pipeline_json = make_dtm_pipeline(str(ground_file), str(dtm_out))
-        pdal.Pipeline(dtm_pipeline_json).execute()
+    ground_files = sorted(GROUND_DIR.glob("*.laz"))
+    print(f"[{AREA}] Rasterising {len(ground_files)} tiles ({max_workers} workers) …")
+    with ProcessPoolExecutor(max_workers=max_workers) as executor:
+        futures = {
+            executor.submit(
+                _rasterize_tile, gf,
+                DTM_DIR / f"{gf.stem.replace('_ground', '')}_dtm.tif",
+            ): gf.name
+            for gf in ground_files
+        }
+        for future in as_completed(futures):
+            name = futures[future]
+            try:
+                future.result()
+                if VERBOSE > 0:
+                    print(f"  [{AREA}] rasterised {name}")
+            except Exception as exc:
+                print(f"  [{AREA}] ERROR rasterising {name}: {exc}")
 
 def merge_dtms(sub_areas: list[str], output_path) -> "Path | None":
     """Merge DTM tiles from sub_areas into a single GeoTIFF at output_path."""
@@ -242,10 +271,13 @@ def merge_dtms(sub_areas: list[str], output_path) -> "Path | None":
 
 
 if __name__ == "__main__":
+    freeze_support()
     parser = argparse.ArgumentParser(description="Process LiDAR tiles for a specified area.")
     parser.add_argument("area", type=str, nargs="+",
                         help="Area(s) to process (e.g., Hopewell_Road, Circleville_Road, full_road)")
     parser.add_argument("--area-splits", type=int, default=1, metavar="N")
+    parser.add_argument("--workers", type=int, default=4, metavar="N",
+                        help="Parallel processes per area (default 4)")
     args = parser.parse_args()
 
     sub_areas: list[str] = []
@@ -256,11 +288,8 @@ if __name__ == "__main__":
         elif args.area_splits > 1:
             sub_areas += [f"{a}_{i}" for i in range(args.area_splits)]
 
-    freeze_support()
-    with ProcessPoolExecutor(max_workers=5) as executor:
-        futures = [executor.submit(process_tiles, name) for name in sub_areas]
-        for future in as_completed(futures):
-            future.result()
+    for name in sub_areas:
+        process_tiles(name, max_workers=args.workers)
 
     if len(sub_areas) > 1:
         out_name = "Whole_Road" if set(args.area) == {"full_road"} else "_".join(args.area)

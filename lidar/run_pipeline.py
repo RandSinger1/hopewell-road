@@ -18,7 +18,6 @@ Usage:
 import argparse
 import json
 import re
-from concurrent.futures import ProcessPoolExecutor, as_completed
 from multiprocessing import freeze_support
 from pathlib import Path
 
@@ -91,16 +90,13 @@ def step_generate(sub_areas: list[str], max_workers: int = 4):
 
 def step_pdal(sub_areas: list[str], max_workers: int = 5):
     print(f"\n=== Step 3 — PDAL pipeline [{len(sub_areas)} sub-areas] ===")
-    freeze_support()
-    with ProcessPoolExecutor(max_workers=max_workers) as executor:
-        futures = {executor.submit(process_tiles, sa): sa for sa in sub_areas}
-        for future in as_completed(futures):
-            sa = futures[future]
-            try:
-                future.result()
-                print(f"  Done: {sa}")
-            except Exception as exc:
-                print(f"  Error processing {sa}: {exc}")
+    for sa in sub_areas:
+        print(f"  [{sa}] starting …")
+        try:
+            process_tiles(sa, max_workers=max_workers)
+            print(f"  [{sa}] done")
+        except Exception as exc:
+            print(f"  [{sa}] ERROR: {exc}")
 
 
 def step_merge(areas: list[str], sub_areas: list[str], separate_year: bool):
@@ -243,4 +239,5 @@ def main():
 
 
 if __name__ == "__main__":
+    freeze_support()
     main()
