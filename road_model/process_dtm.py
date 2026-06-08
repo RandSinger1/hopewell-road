@@ -24,10 +24,18 @@ def get_window(lat, lon, size_x_meters, size_y_meters, gt, band, nodata):
     max_lon = lon + delta_x
     min_lat = lat - delta_y
     max_lat = lat + delta_y
+    raster_cols = band.XSize
+    raster_rows = band.YSize
     col_start = int((min_lon - gt[0]) / gt[1])
     col_end = int((max_lon - gt[0]) / gt[1]) + 1
     row_start = int((gt[3] - max_lat) / abs(gt[5]))
     row_end = int((gt[3] - min_lat) / abs(gt[5])) + 1
+    if col_end <= 0 or col_start >= raster_cols or row_end <= 0 or row_start >= raster_rows:
+        return None, None
+    col_start = max(col_start, 0)
+    col_end = min(col_end, raster_cols)
+    row_start = max(row_start, 0)
+    row_end = min(row_end, raster_rows)
     xmin_win = gt[0] + col_start * gt[1]
     ymax_win = gt[3] + row_start * gt[5]
     xmax_win = gt[0] + col_end * gt[1]

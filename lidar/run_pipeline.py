@@ -42,7 +42,10 @@ def _resolve_area(area: str) -> list[str]:
 
 def _discover_sub_areas(area: str) -> list[str]:
     """Discover sub-areas from previously saved JSON file lists."""
-    found = sorted(Path("data/saved_file_lists").glob(f"{area}*.json"))
+    found = sorted(
+        p for p in Path("data/saved_file_lists").glob(f"{area}_*.json")
+        if re.fullmatch(rf"{re.escape(area)}_\d+", p.stem)
+    )
     if found:
         return [p.stem for p in found]
     return [area]
@@ -197,6 +200,10 @@ def main():
         help="Skip Step 4 (DTM merge already done)",
     )
     parser.add_argument(
+        "--skip-view", action="store_true",
+        help="Skip Step 5 (quick view already done)",
+    )
+    parser.add_argument(
         "--download-workers", type=int, default=4,
         help="Parallel download threads (default 4)",
     )
@@ -233,7 +240,8 @@ def main():
     if not args.skip_merge:
         step_merge(areas, all_sub_areas, args.separate_year)
 
-    step_view(areas, all_sub_areas, args.separate_year)
+    if not args.skip_view:
+        step_view(areas, all_sub_areas, args.separate_year)
 
     print("\n=== Pipeline complete ===")
 
