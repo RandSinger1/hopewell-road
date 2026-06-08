@@ -342,7 +342,9 @@ def remove_invalid_pairs(
 
     return filtered    
 
-def search_region(filepath: str, coordinates: tuple[float, float], size_x_meters: float, size_y_meters: float, output_dir: Path, verbose: int = 0, picture: bool = False):
+def search_region(filepath: str, coordinates: tuple[float, float], size_x_meters: float, size_y_meters: float, output_dir: Path, verbose: int = 0, picture: bool = False, target_angle: float = None):
+    if target_angle is None:
+        target_angle = parameters.TARGET_ANGLE
     output_path = Path(output_dir) / f"{round(coordinates[0], 4)}_{round(coordinates[1], 4)}"
     print(f"Writing to {output_path} …")
     if (output_path / "line_overlay.json").exists():
@@ -355,7 +357,6 @@ def search_region(filepath: str, coordinates: tuple[float, float], size_x_meters
         return
     window_original = window.copy()
     window_original = np.where(window_original == nodata, np.nan, window_original)
-    target_angle = parameters.TARGET_ANGLE
     angle_tolerance = parameters.ANGLE_TOLERANCE
     if verbose > 0: print(f"Filtering DTM with median smoothing")
     smoothed = median_smooth_windowed(window, nodata=nodata)

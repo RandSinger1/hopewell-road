@@ -2,113 +2,344 @@ import argparse
 from pathlib import Path
 
 import numpy as np
-from shapely.geometry import Polygon, Point
+from shapely.geometry import Polygon
 from concurrent.futures import ProcessPoolExecutor
+import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
 
+import parameters
 from road_model.ridge_detection import search_region
 from utils import convert_meters_degrees_pixels, METERS, DEGREES
 
 import json
 
-def tile_polygon(filepath, polygon_vertices, size_x, size_y, overlap):
+# ── Named coordinates ─────────────────────────────────────────────────────────
+CIRCLEVILLE = (39.6, -82.9)   # (lat, lon)
+NEWARK      = (40.0,  -82.4)
+CHILICOTHE  = (39.3,  -82.9)
+
+
+# ── Tile generators ───────────────────────────────────────────────────────────
+
+def tile_polygon(polygon_vertices, size_x, size_y, overlap,
+                 target_angle=None):
     """
-    Cover a polygon with overlapping axis‑aligned tiles and call search_region for each.
+    Cover a polygon with overlapping tiles.
 
-    Parameters
-    ----------
-    filepath : str
-        Path to the source DTM/lidar file.
-    polygon_vertices : list of (x, y) tuples
-        Vertices of the polygon (in the same CRS as the DTM).
-    size_x : float
-        Tile width in map units (e.g., meters).
-    size_y : float
-        Tile height in map units.
-    overlap : float
-        Overlap fraction between adjacent tiles, e.g., 0.2 = 20% overlap.
-    output_dir : str
-        Directory where search_region will save outputs.
+    Returns
+    -------
+    list of (coord, angle_deg)
+        coord is the tile lower-left corner (lon, lat).
+        angle_deg is uniform for every tile (defaults to parameters.TARGET_ANGLE).
     """
-    hopewell_road_polygon = json.load(open('data/polygons.json'))['Hopewell_Road']
-    # flip x and y
-    hopewell_road_polygon = Polygon([(y, x) for x, y in hopewell_road_polygon])
+    if target_angle is None:
+        target_angle = parameters.TARGET_ANGLE
 
-    # Create Shapely polygon
-    poly = Polygon(hopewell_road_polygon)
-
-    # Get bounding box of the polygon
+    poly = Polygon(polygon_vertices)
     minx, miny, maxx, maxy = poly.bounds
-
     size_x_deg, size_y_deg = convert_meters_degrees_pixels(METERS, DEGREES, size_x, size_y)
-
-    # Compute step sizes accounting for overlap
     step_x = size_x_deg * (1 - overlap)
     step_y = size_y_deg * (1 - overlap)
 
-    # Iterate from top to bottom: start at maxy, go down
+    tiles = []
     y = maxy
-    tile_index = 0
-    coords = []
     while y > miny:
         x = minx
         while x < maxx:
-            # Lower‑left corner of the tile
-            tile_ll = (x, y - size_y_deg)   # because y is top edge, subtract height
+            tile_rect = Polygon([
+                (x,              y - size_y_deg),
+                (x + size_x_deg, y - size_y_deg),
+                (x + size_x_deg, y),
+                (x,              y),
+            ])
+            if poly.intersects(tile_rect):
+                tiles.append(((x, y - size_y_deg), target_angle))
+            x += step_x
+        y -= step_y
+    return tiles
 
-            # OPTION: If search_region expects centre, use:
-            # tile_centre = (x + size_x/2, y - size_y/2)
 
-            # Check if this tile (as a rectangle) intersects the polygon
-            tile_rect = Polygon([(x, y - size_y_deg), (x + size_x_deg, y - size_y_deg),
-                                 (x + size_x_deg, y), (x, y)])
-            if poly.intersects(tile_rect) and poly.intersects(hopewell_road_polygon):
-                coords.append(tile_ll)
-                # Call your existing function
-                tile_index += 1
+def make_parabola(a, b, c, x_offset):
+    """
+    Build (curve_func, curve_deriv) for  y = a*(x-x0)^2 + b*(x-x0) + c.
+    """
+    def curve_func(x):
+        dx = x - x_offset
+        return a * dx**2 + b * dx + c
+
+    def curve_deriv(x):
+        dx = x - x_offset
+        return 2 * a * dx + b
+
+    return curve_func, curve_deriv
+
+
+def make_line(x0, y0, x1, y1):
+    """
+    Build (curve_func, curve_deriv) for the straight line through two lon/lat points.
+    x0,y0 and x1,y1 are (lon, lat).
+    """
+    slope = (y1 - y0) / (x1 - x0)
+
+    def curve_func(x):
+        return slope * (x - x0) + y0
+
+    def curve_deriv(_x):
+        return slope
+
+    return curve_func, curve_deriv
+
+
+def tile_curve(curve_func, curve_deriv, x_start, x_end,
+               half_width_deg, size_x, size_y, overlap):
+    """
+    Cover a curve corridor with overlapping tiles and compute tangent angles.
+
+    For every tile whose center falls within *half_width_deg* of the curve
+    (measured in the latitude direction), the target angle is
+    arctan(curve_deriv(center_lon)) converted to degrees.
+
+    Parameters
+    ----------
+    curve_func : callable
+        f(lon) -> lat along the curve.
+    curve_deriv : callable
+        f'(lon) -> dlat/dlon at that longitude.
+    x_start, x_end : float
+        Longitude range to scan (degrees).
+    half_width_deg : float
+        Corridor half-width in degrees on each side of the curve.
+    size_x, size_y : float
+        Tile dimensions in metres.
+    overlap : float
+        Overlap fraction between adjacent tiles (e.g. 0.2 = 20 %).
+
+    Returns
+    -------
+    list of (coord, angle_deg)
+        coord is the tile lower-left corner (lon, lat).
+    """
+    size_x_deg, size_y_deg = convert_meters_degrees_pixels(METERS, DEGREES, size_x, size_y)
+    step_x = size_x_deg * (1 - overlap)
+    step_y = size_y_deg * (1 - overlap)
+
+    x_samples = np.linspace(x_start, x_end, 500)
+    y_samples = np.array([curve_func(x) for x in x_samples])
+    miny = y_samples.min() - half_width_deg
+    maxy = y_samples.max() + half_width_deg
+
+    tiles = []
+    y = maxy
+    while y > miny:
+        x = x_start
+        while x < x_end:
+            center_x = x + size_x_deg / 2
+            center_y = y - size_y_deg / 2
+
+            if abs(center_y - curve_func(center_x)) <= half_width_deg:
+                tile_ll = (y - size_y_deg, x)  # (lat, lon) — consistent with tile_polygon
+                # cross-ridge angle in image coords (y-down): 90 - geo_road_angle
+                angle = (90.0 - np.degrees(np.arctan(curve_deriv(center_x)))) % 180
+                tiles.append((tile_ll, angle))
 
             x += step_x
         y -= step_y
-    return coords
-def main(max_workers):
-    
-    filepath ='data/loaded_tiles/Whole_Road/merged_dtm.tif'
-    circleville =(39.6,-82.9)
-    newark = (40.0, -82.4)
-    chilicothe = (39.3,-82.9)
-    polygon_vertices = [circleville, newark, chilicothe]
-    
-    size_x = 600
-    size_y = 600
-    overlap = 100
-    metadata = {
-        'coords': polygon_vertices,
-        'size_x': size_x,
-        'size_y': size_y,
-        'overlap': overlap
-    }
-    output_dir = Path('data/locations') / f'{size_x}_{size_y}'
-    metadata_path = Path(output_dir) / 'metadata.json'
-    #output_dir.mkdir(exist_ok=False)
-    json.dump(metadata, metadata_path.open('w'))
-    coords = tile_polygon(filepath, polygon_vertices, size_x, size_y, overlap/size_x)
-    print(f"Tiles to search: {len(coords)}")
-    total = len(coords)
+
+    return tiles
+
+
+# ── Route presets ─────────────────────────────────────────────────────────────
+
+def _tiles_polygon(size_x, size_y, overlap):
+    """Whole study-area polygon, uniform TARGET_ANGLE."""
+    polygon_vertices = [CIRCLEVILLE, NEWARK, CHILICOTHE]
+    return tile_polygon(polygon_vertices, size_x, size_y, overlap)
+
+
+def _tiles_circleville(size_x, size_y, overlap, half_width_meters=5000):
+    """Parabolic corridor from Circleville to Newark."""
+    half_width_deg = convert_meters_degrees_pixels(METERS, DEGREES, 0, half_width_meters)[1]
+    clon = CIRCLEVILLE[1]
+    curve_func, curve_deriv = make_parabola(1.7, -.1, 39.6, x_offset=clon)
+    return tile_curve(
+        curve_func, curve_deriv,
+        x_start=clon, x_end=NEWARK[1],
+        half_width_deg=half_width_deg,
+        size_x=size_x, size_y=size_y, overlap=overlap,
+    )
+
+
+def _tiles_chilicothe(size_x, size_y, overlap, half_width_meters=5000):
+    """Straight-line corridor from Chillicothe to Circleville."""
+    half_width_deg = convert_meters_degrees_pixels(METERS, DEGREES, 0, half_width_meters)[1]
+    x0, y0 = CHILICOTHE[1], CHILICOTHE[0]
+    x1, y1 = CIRCLEVILLE[1], CIRCLEVILLE[0]
+    curve_func, curve_deriv = make_line(x0, y0, x1, y1)
+    return tile_curve(
+        curve_func, curve_deriv,
+        x_start=x0, x_end=x1,
+        half_width_deg=half_width_deg,
+        size_x=size_x, size_y=size_y, overlap=overlap,
+    )
+
+
+MODES = {
+    'polygon':      _tiles_polygon,
+    'circleville':  _tiles_circleville,
+    'chilicothe':   _tiles_chilicothe,
+}
+
+
+# ── Preview ───────────────────────────────────────────────────────────────────
+
+_CITIES = {
+    'Circleville': CIRCLEVILLE,
+    'Newark':      NEWARK,
+    'Chillicothe': CHILICOTHE,
+}
+
+def preview_tiles(tiles, mode, size_x, size_y):
+    """Show a map of tiles and named cities before the search runs."""
+    size_x_deg, size_y_deg = convert_meters_degrees_pixels(METERS, DEGREES, size_x, size_y)
+
+    fig, ax = plt.subplots(figsize=(11, 9))
+
+    # Tile footprints — rectangles for small counts, scatter for large
+    lats = [coord[0] for coord, _ in tiles]
+    lons = [coord[1] for coord, _ in tiles]
+
+    if len(tiles) <= 600:
+        for (lat, lon), _ in tiles:
+            ax.add_patch(mpatches.Rectangle(
+                (lon, lat), size_x_deg, size_y_deg,
+                linewidth=0.4, edgecolor='steelblue',
+                facecolor='lightblue', alpha=0.35,
+            ))
+        # Expand limits manually since add_patch doesn't update autoscale
+        ax.set_xlim(min(lons) - size_x_deg, max(lons) + 2 * size_x_deg)
+        ax.set_ylim(min(lats) - size_y_deg, max(lats) + 2 * size_y_deg)
+    else:
+        ax.scatter(lons, lats, s=4, color='steelblue', alpha=0.4, label=f'{len(tiles)} tiles')
+        ax.autoscale()
+
+    # Bounding box of search area
+    if lats:
+        bbox = mpatches.Rectangle(
+            (min(lons), min(lats)),
+            max(lons) + size_x_deg - min(lons),
+            max(lats) + size_y_deg - min(lats),
+            linewidth=1.5, edgecolor='navy', facecolor='none', linestyle='--',
+        )
+        ax.add_patch(bbox)
+
+    # Straight line Newark → Chillicothe
+    ax.plot(
+        [NEWARK[1], CHILICOTHE[1]],
+        [NEWARK[0], CHILICOTHE[0]],
+        color='darkorange', linewidth=1.5, linestyle='--', zorder=5,
+        label='Newark–Chillicothe',
+    )
+
+    # Named cities
+    for name, (clat, clon) in _CITIES.items():
+        ax.plot(clon, clat, 'r*', markersize=14, zorder=6)
+        ax.annotate(
+            name, (clon, clat),
+            textcoords='offset points', xytext=(7, 4),
+            fontsize=11, fontweight='bold', color='darkred',
+        )
+
+    ax.set_xlabel('Longitude')
+    ax.set_ylabel('Latitude')
+    ax.set_title(
+        f'Search preview  ·  mode={mode}  ·  {len(tiles)} tiles  ·  {size_x}×{size_y} m each',
+        fontsize=12,
+    )
+    ax.set_aspect('equal', adjustable='datalim')
+    ax.grid(True, alpha=0.3)
+    plt.tight_layout()
+    plt.show()
+
+
+# ── Runner ────────────────────────────────────────────────────────────────────
+
+def run_tiles(tiles, filepath, size_x, size_y, output_dir, max_workers):
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    total = len(tiles)
+    print(f"Tiles to search: {total}")
+
     if max_workers > 1:
-        with ProcessPoolExecutor(max_workers=max_workers) as executer:
-            args_list = [(filepath, coord, size_x, size_y, output_dir) for coord in coords]
-            futures = [executer.submit(search_region, *args) for args in args_list]
+        with ProcessPoolExecutor(max_workers=max_workers) as executor:
+            args_list = [
+                (filepath, coord, size_x, size_y, output_dir, 0, False, angle)
+                for coord, angle in tiles
+            ]
+            futures = [executor.submit(search_region, *args) for args in args_list]
             for i, future in enumerate(futures, 1):
                 future.result()
                 print(f"Progress: {i}/{total} ({100*i//total}%)")
-
-    elif max_workers == 1:
-        for i, coord in enumerate(coords, 1):
-            search_region(filepath, coord, size_x, size_y, output_dir, picture=False)
+    else:
+        for i, (coord, angle) in enumerate(tiles, 1):
+            search_region(filepath, coord, size_x, size_y, output_dir,
+                          picture=False, target_angle=angle)
             print(f"Progress: {i}/{total} ({100*i//total}%)")
+
+
+def main(mode, max_workers, size_x, size_y, overlap, half_width_meters, preview=False):
+    filepath = parameters.SCAN_DTM_PATH
+
+    tile_fn = MODES[mode]
+
+    # corridor routes accept half_width_deg; polygon doesn't
+    if mode == 'polygon':
+        tiles = tile_fn(size_x, size_y, overlap)
+    else:
+        tiles = tile_fn(size_x, size_y, overlap, half_width_meters)
+
+    if preview:
+        preview_tiles(tiles, mode, size_x, size_y)
+
+    output_dir = Path('data/locations') / f'{mode}_{size_x}_{size_y}'
+    run_tiles(tiles, filepath, size_x, size_y, output_dir, max_workers)
+
+
 if __name__ == '__main__':
-    # Get parameters from command line or config file as needed with --max_workers or -w
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--max_workers', '-w', type=int, default=1,
-                        help='Number of parallel workers to use (default: 1)')
+    parser = argparse.ArgumentParser(
+        description='Tile-scan the LiDAR DTM for Hopewell Road earthworks.')
+    parser.add_argument(
+        '--mode', '-m',
+        choices=list(MODES),
+        default='polygon',
+        help='Search region: polygon (default), circleville, or chilicothe')
+    parser.add_argument(
+        '--max_workers', '-w',
+        type=int, default=parameters.SCAN_MAX_WORKERS,
+        help=f'Parallel workers (default: {parameters.SCAN_MAX_WORKERS})')
+    parser.add_argument(
+        '--size_x', type=int, default=parameters.SCAN_TILE_SIZE_M,
+        help=f'Tile width in metres (default: {parameters.SCAN_TILE_SIZE_M})')
+    parser.add_argument(
+        '--size_y', type=int, default=parameters.SCAN_TILE_SIZE_M,
+        help=f'Tile height in metres (default: {parameters.SCAN_TILE_SIZE_M})')
+    parser.add_argument(
+        '--overlap', type=float,
+        default=parameters.SCAN_OVERLAP_M / parameters.SCAN_TILE_SIZE_M,
+        help='Overlap fraction 0–1 (default derived from SCAN_OVERLAP_M)')
+    parser.add_argument(
+        '--half_width_meters', type=int, default=5000,
+        help='Corridor half-width in metres for curve modes (default: 5000 m)')
+    parser.add_argument(
+        '--preview', action='store_true',
+        help='Show a map of tiles and cities before running the search')
+
     args = parser.parse_args()
-    main(max_workers=args.max_workers)
+    main(
+        mode=args.mode,
+        max_workers=args.max_workers,
+        size_x=args.size_x,
+        size_y=args.size_y,
+        overlap=args.overlap,
+        half_width_meters=args.half_width_meters,
+        preview=args.preview,
+    )

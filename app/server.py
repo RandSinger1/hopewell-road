@@ -17,6 +17,8 @@ from flask import Flask, jsonify, render_template, request, send_file
 
 import parameters
 
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
 log = logging.getLogger(__name__)
 
 app = Flask(__name__)
@@ -527,15 +529,31 @@ def main():
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     )
     parser = argparse.ArgumentParser(description="KhthonLiDAR Map Viewer")
-    parser.add_argument("--folder", default="", help="Locations subfolder (e.g. data/locations/600_600)")
+    parser.add_argument("--folder", default="", help="Locations subfolder (e.g. data/locations)")
+    parser.add_argument("--search-size", type=int, default=parameters.SCAN_TILE_SIZE_M, help="Search size in pixels for line overlay matching")
+    parser.add_argument("--mode", choices=["polygon", "circleville", "chilicothe"],
+                        help="Auto-select the locations folder that matches this scan mode")
     parser.add_argument("--dtm", default="", help="Path to merged DTM GeoTIFF")
     parser.add_argument("--port", type=int, default=parameters.SERVER_PORT)
     args = parser.parse_args()
 
-    if args.folder:
-        folder = args.folder if os.path.isabs(args.folder) else str(PROJECT_ROOT / args.folder)
-        state["locations_folder"] = folder
-        state["lines"] = _load_lines(folder)
+    size = args.search_size
+    folder = args.folder
+    loc_root = PROJECT_ROOT / "data" / "locations"
+    if folder:
+        folder = folder if os.path.isabs(folder) else str(PROJECT_ROOT / folder)
+    else:
+        if args.mode:
+            matches = sorted(loc_root.glob(f"{args.mode}_{size}_{size}"))
+        else:
+            matches = sorted(loc_root.glob(f"{size}_{size}"))
+        if matches:
+            folder = str(matches[0])
+            log.info("mode=%s → auto-selected folder: %s", args.mode, folder)
+        else:
+            log.warning("No locations folder found matching mode '%s' in %s", args.mode, loc_root)
+    state["locations_folder"] = folder
+    state["lines"] = _load_lines(folder)
 
     if args.dtm:
         path = args.dtm if os.path.isabs(args.dtm) else str(PROJECT_ROOT / args.dtm)
