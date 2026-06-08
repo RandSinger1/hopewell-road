@@ -158,7 +158,7 @@ TARGET_ANGLE: float = 32.0
 """Expected wall orientation in image space (degrees counter-clockwise from
 the +x axis).  Calibrated against the Van Voorhis ground-truth site."""
 
-SPACING_METERS: float = 40.0
+SPACING_METERS: float = 38.0
 """Expected centre-to-centre distance between the two parallel earthen walls
 (metres).  Hopewell Road earthworks are typically 38–42 m apart."""
 
@@ -207,7 +207,7 @@ PAIRING_ANGLE_TOLERANCE_DEG: float = 5.0
 """Maximum angular difference (degrees) between two fitted lines to be
 considered a parallel pair.  Very tight — ensures truly parallel walls."""
 
-SPACING_TOLERANCE: float = 0.4
+SPACING_TOLERANCE: float = 0.3
 """Relative tolerance on the wall-to-wall spacing, e.g. 0.20 = ±20 %.
 A detected pair whose spacing deviates more than this from SPACING_METERS
 is rejected."""
@@ -357,17 +357,17 @@ REPORT_COORDS: list = [
     {
         "name": "Van Voorhis Wall",
         "lat":   40.0, "lon": -82.4, "size_m": 200,
-        "note": "Ground truth — confirmed earthwork",
+        "note": "Ground truth — confirmed earthwork, 41 m width",
+    },
+{
+        "name": "Beaver Run",
+        "lat":   39.9, "lon": -82.5, "size_m": 200,
+        "note": "Proposed route, 37 m width"
     },
     {
         "name": "Route 40",
         "lat":   39.9, "lon": -82.5, "size_m": 200,
-        "note": "Proposed route",
-    },
-    {
-        "name": "Beaver Run",
-        "lat":   39.9, "lon": -82.5, "size_m": 200,
-        "note": "Proposed route"
+        "note": "Proposed route, 33 m width",
     },
     {
         "name": "Blacklick Eastern",
