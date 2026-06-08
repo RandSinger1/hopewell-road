@@ -54,6 +54,21 @@ _STEP_LABELS = [
     "⑫ Detected Pairs",
 ]
 
+_STEP_SLUGS = [
+    "01_raw_dtm",
+    "02_median_smooth",
+    "03_local_relief_model",
+    "04_frangi_ridge_response",
+    "05_hessian_orientation",
+    "06_hillshade_perp32",
+    "07_angle_deviation",
+    "08_ridge_response",
+    "09_labeled_components",
+    "10_hough_reconstruction",
+    "11_skeleton",
+    "12_detected_pairs",
+]
+
 
 def _img(ax: plt.Axes, data: np.ndarray, label: str,
          cmap: str = "gray", extent: list = None) -> None:
@@ -255,4 +270,19 @@ def generate_pipeline_figure(coord: dict, dtm_path: str, output_dir: Path) -> No
                 spine.set_edgecolor("#333333")
 
     plt.tight_layout(rect=[0, 0, 1, 0.97])
+
+    # ── Save each step as an individual image ─────────────────────────────────
+    step_dir = output_dir / name / "pipeline_steps"
+    step_dir.mkdir(parents=True, exist_ok=True)
+    fig.canvas.draw()
+    renderer = fig.canvas.get_renderer()
+    for i, ax in enumerate(axes.flat):
+        bbox_disp = ax.get_tightbbox(renderer)
+        if bbox_disp is not None:
+            bbox_in = bbox_disp.expanded(1.02, 1.04).transformed(
+                fig.dpi_scale_trans.inverted()
+            )
+            fig.savefig(step_dir / f"{_STEP_SLUGS[i]}.png", dpi=cfg.DPI, bbox_inches=bbox_in)
+    print(f"    saved pipeline steps → {step_dir}/")
+
     save_figure(fig, output_dir / name, "pipeline_steps.png", dpi=cfg.DPI)
