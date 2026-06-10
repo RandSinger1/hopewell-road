@@ -96,6 +96,11 @@ DTM_INTERP_METHOD: str = "idw"
 """PDAL/GDAL interpolation algorithm for DTM gridding.
 'idw' (inverse-distance weighting) is robust for sparse returns."""
 
+# ── Source CRS (used when DTM tiles have no embedded projection) ──────────────
+
+SOURCE_CRS: str = "EPSG:6551"
+"""Coordinate reference system of the source LiDAR tiles, used as a fallback
+when the CRS cannot be read from the file metadata.  EPSG:6551 """
 # ── Warp / mosaic settings (gdal.Warp) ───────────────────────────────────────
 
 WARP_RESAMPLE: str = "bilinear"

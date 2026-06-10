@@ -102,7 +102,7 @@ def step_pdal(sub_areas: list[str], max_workers: int = 5):
             print(f"  [{sa}] ERROR: {exc}")
 
 
-def step_merge(areas: list[str], sub_areas: list[str], separate_year: bool):
+def step_merge(areas: list[str], sub_areas: list[str], separate_year: bool, workers: int = 1):
     print("\n=== Step 4 — merge DTMs ===")
     if len(sub_areas) <= 1:
         print("  Only one sub-area — skipping merge.")
@@ -121,12 +121,12 @@ def step_merge(areas: list[str], sub_areas: list[str], separate_year: bool):
             for year, year_subs in sorted(by_year.items()):
                 out_path = out_dir / f"merged_dtm_{year}.tif"
                 print(f"  Merging {len(year_subs)} sub-area(s) for {year} → {out_path}")
-                merge_dtms(year_subs, out_path)
+                merge_dtms(year_subs, out_path, workers=workers)
             return
 
     out_path = out_dir / "merged_dtm.tif"
     print(f"  Merging {len(sub_areas)} sub-areas → {out_path}")
-    merge_dtms(sub_areas, out_path)
+    merge_dtms(sub_areas, out_path, workers=workers)
 
 
 def step_view(areas: list[str], sub_areas: list[str], separate_year: bool):
@@ -238,7 +238,7 @@ def main():
         step_pdal(all_sub_areas, max_workers=args.pdal_workers)
 
     if not args.skip_merge:
-        step_merge(areas, all_sub_areas, args.separate_year)
+        step_merge(areas, all_sub_areas, args.separate_year, workers=args.pdal_workers)
 
     if not args.skip_view:
         step_view(areas, all_sub_areas, args.separate_year)
