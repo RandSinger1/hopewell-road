@@ -16,6 +16,7 @@ from parameters import (
     NODATA,
     MEDIAN_SMOOTH_RADIUS,
     LRM_RADIUS,
+    LRM_METHOD,
     RIDGE_SCALES,
     SVF_RADIUS,
     SVF_DIRECTIONS,

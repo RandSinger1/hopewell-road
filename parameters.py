@@ -118,14 +118,20 @@ WARP_CREATION_OPTS: list = [
 # §4  DTM PRE-PROCESSING  (process_dtm.py)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-MEDIAN_SMOOTH_RADIUS: int = 10
+MEDIAN_SMOOTH_RADIUS: int = 5
 """Kernel half-size (cells) for the nodata-aware median filter.
 Full kernel = (2 × radius + 1)².  Removes sub-metre noise while
 preserving sharp earthwork edges."""
 
-LRM_RADIUS: int = 30
-"""Neighbourhood half-size (cells) for the Local Relief Model mean surface.
-The LRM = elevation − local_mean highlights micro-topography."""
+LRM_RADIUS: int = 40
+"""Neighbourhood half-size (cells) for the Local Relief Model surface estimate.
+The LRM = elevation − local_surface highlights micro-topography."""
+
+LRM_METHOD: str = "median"
+"""Surface estimator used to compute the regional baseline in the LRM.
+'mean'   — box-filter mean (fast, slight blurring of sharp edges).
+'median' — median filter  (slower but preserves sharp edges better,
+           consistent with the upstream median-smoothing step)."""
 
 RIDGE_SCALES: list = [1, 2, 3, 6]
 """Frangi vesselness filter scales (σ, in pixels ≈ metres at 1 m/px).

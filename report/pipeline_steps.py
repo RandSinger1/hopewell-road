@@ -4,21 +4,21 @@ pipeline_steps.py  —  Step-by-step processing pipeline figure.
 Produces a 2-row × 5-column figure showing every stage from raw DTM to
 detected parallel wall pairs.
 
-Row 1 — Pre-processing
+Row 1 — Pre-processing → amplitude gate
   [1] Raw DTM (hillshaded)
   [2] Median-smoothed DTM
   [3] Local Relief Model (LRM)
   [4] Multi-scale Frangi ridge response
-  [5] Hessian Orientation
-  [6] Hillshade perpendicular to 32°
+  [5] Ridge amplitude threshold
+  [6] Hessian orientation
 
-Row 2 — Detection
+Row 2 — Orientation filter → binary → skeleton → pairs + diagnostic
   [7] Angle deviation map
-  [8] Ridge threshold
-  [9] Labelled skeleton components
-  [10] Hough reconstruction
-  [11] Skeleton
-  [12] Detected parallel wall pairs
+  [8] Along-wall gap fill
+  [9] Skeleton
+  [10] Labelled skeleton components
+  [11] Detected parallel wall pairs
+  [12] Hillshade perpendicular to 32° (visual diagnostic)
 
 Call generate_pipeline_figure(coord, dtm_path, output_dir) from run_report.py.
 """
@@ -40,33 +40,35 @@ import parameters
 
 
 _STEP_LABELS = [
-    "① Raw DTM",
-    "② Median Smooth",
-    "③ Local Relief Model",
-    "④ Frangi Ridge Response",
-    "⑤ Hessian Orientation",
-    "⑥ Hillshade ⊥ 32°",
-    "⑦ Angle Deviation",
-    "⑧ Ridge Response",
-    "⑨ Labeled Components",
-    "⑩ Hough Reconstruction",
-    "⑪ Skeleton",
-    "⑫ Detected Pairs",
+    "1. Raw DTM",
+    "2. Median Smooth",
+    "3. Local Relief Model",
+    "4. Frangi Ridge Response",
+    "5. Ridge Amplitude Threshold",
+    "6. Hessian Orientation",
+    "7. Angle Deviation",
+    "8. Along-Wall Gap Fill",
+    "9. Skeleton",
+    "10. Labeled Components",
+    "11. Detected Pairs",
+    "12. Hillshade ⊥ 32°",
 ]
 
+# Slugs follow axis order (left-to-right, top-to-bottom) but keep the original
+# file-name prefixes so generate_report_doc.py can find each image by slug.
 _STEP_SLUGS = [
     "01_raw_dtm",
     "02_median_smooth",
     "03_local_relief_model",
     "04_frangi_ridge_response",
-    "05_hessian_orientation",
-    "06_hillshade_perp32",
+    "05_ridge_response",       # axis [0,4] — amplitude threshold (was row-2 pos 8)
+    "06_hessian_orientation",  # axis [0,5] — moved from row-1 pos 5
     "07_angle_deviation",
-    "08_ridge_response",
-    "09_labeled_components",
-    "10_hough_reconstruction",
-    "11_skeleton",
-    "12_detected_pairs",
+    "08_hough_reconstruction", # axis [1,1] — gap fill (was pos 10)
+    "09_skeleton",             # axis [1,2]
+    "10_labeled_components",   # axis [1,3] — follows skeleton
+    "11_detected_pairs",       # axis [1,4]
+    "12_hillshade_perp32",     # axis [1,5] — visual diagnostic at end
 ]
 
 
@@ -163,69 +165,64 @@ def generate_pipeline_figure(coord: dict, dtm_path: str, output_dir: Path) -> No
         cb.ax.yaxis.set_tick_params(colors="gray", labelsize=6)
         return cb
 
-    # ── Row 1: pre-processing + Hessian orientation ───────────────────────────
+    # ── Row 1: pre-processing → amplitude gate → orientation ─────────────────
     axes[0, 0].imshow(hs_raw,    origin="upper", extent=ext, aspect="auto")
-    style_axes(axes[0, 0], "① Raw DTM")
+    style_axes(axes[0, 0], "1. Raw DTM")
     axes[0, 0].set_xticks([]); axes[0, 0].set_yticks([])
 
     axes[0, 1].imshow(hs_smooth, origin="upper", extent=ext, aspect="auto")
-    style_axes(axes[0, 1], "② Median Smooth")
+    style_axes(axes[0, 1], "2. Median Smooth")
     axes[0, 1].set_xticks([]); axes[0, 1].set_yticks([])
 
     _cb(axes[0, 2], axes[0, 2].imshow(lrm_disp, origin="upper", cmap="RdBu_r",
                                        extent=ext, aspect="auto"))
-    style_axes(axes[0, 2], "③ Local Relief Model")
+    style_axes(axes[0, 2], "3. Local Relief Model")
     axes[0, 2].set_xticks([]); axes[0, 2].set_yticks([])
 
     ridge_disp = np.where(ridge == nodata, np.nan, ridge)
     _cb(axes[0, 3], axes[0, 3].imshow(ridge_disp, origin="upper", cmap="hot",
                                        extent=ext, aspect="auto"))
-    style_axes(axes[0, 3], "④ Frangi Ridge Response")
+    style_axes(axes[0, 3], "4. Frangi Ridge Response")
     axes[0, 3].set_xticks([]); axes[0, 3].set_yticks([])
 
-    cb_ori = _cb(axes[0, 4], axes[0, 4].imshow(orient_disp, origin="upper", cmap="hsv",
+    ridge_thresh_disp = np.where(nd_mask, np.nan, valid_ridge)
+    cb_rt = _cb(axes[0, 4], axes[0, 4].imshow(ridge_thresh_disp, origin="upper", cmap="hot",
+                                                extent=ext, aspect="auto"))
+    cb_rt.ax.axhline(cfg.RIDGE_THRESHOLD, color="cyan", linewidth=1.5, linestyle="--")
+    cb_rt.ax.annotate(f"t={cfg.RIDGE_THRESHOLD}", xy=(1.05, cfg.RIDGE_THRESHOLD),
+                      xycoords=("axes fraction", "data"), fontsize=5, color="cyan", va="center")
+    style_axes(axes[0, 4], f"5. Ridge Amplitude Threshold  (t={cfg.RIDGE_THRESHOLD})")
+    axes[0, 4].set_xticks([]); axes[0, 4].set_yticks([])
+
+    cb_ori = _cb(axes[0, 5], axes[0, 5].imshow(orient_disp, origin="upper", cmap="hsv",
                                                  vmin=0, vmax=180, extent=ext, aspect="auto"))
     cb_ori.ax.axhline(cfg.TARGET_ANGLE, color="cyan", linewidth=1.2, linestyle="--")
     cb_ori.ax.annotate(f"{cfg.TARGET_ANGLE:.0f}°", xy=(1.05, cfg.TARGET_ANGLE),
                        xycoords=("axes fraction", "data"), fontsize=5, color="cyan", va="center")
-    style_axes(axes[0, 4], f"⑤ Hessian Orientation  (target {cfg.TARGET_ANGLE:.0f}°)")
-    axes[0, 4].set_xticks([]); axes[0, 4].set_yticks([])
-
-    axes[0, 5].imshow(hs_perp32, origin="upper", cmap="gray", extent=ext, aspect="auto",
-                      vmin=0, vmax=1)
-    style_axes(axes[0, 5], "⑥ Hillshade ⊥ 32°  (az 122°, alt 20°)")
+    style_axes(axes[0, 5], f"6. Hessian Orientation  (target {cfg.TARGET_ANGLE:.0f}°)")
     axes[0, 5].set_xticks([]); axes[0, 5].set_yticks([])
 
-    # ── Row 2: detection pipeline ─────────────────────────────────────────────
+    # ── Row 2: orientation filter → gap fill → skeleton → labels → pairs + diag
     cb_diff = _cb(axes[1, 0], axes[1, 0].imshow(diff_disp, origin="upper", cmap="RdYlGn_r",
                                                   vmin=0, vmax=90, extent=ext, aspect="auto"))
     cb_diff.ax.axhline(cfg.ANGLE_TOLERANCE, color="cyan", linewidth=1.2, linestyle="--")
     cb_diff.ax.annotate(f"±{cfg.ANGLE_TOLERANCE:.0f}°", xy=(1.05, cfg.ANGLE_TOLERANCE),
                         xycoords=("axes fraction", "data"), fontsize=5, color="cyan", va="center")
-    style_axes(axes[1, 0], f"⑦ Angle Deviation  (tol ±{cfg.ANGLE_TOLERANCE:.0f}°)")
+    style_axes(axes[1, 0], f"7. Angle Deviation  (tol ±{cfg.ANGLE_TOLERANCE:.0f}°)")
     axes[1, 0].set_xticks([]); axes[1, 0].set_yticks([])
 
-    ridge_thresh_disp = np.where(nd_mask, np.nan, valid_ridge)
-    cb_rt = _cb(axes[1, 1], axes[1, 1].imshow(ridge_thresh_disp, origin="upper", cmap="hot",
-                                                extent=ext, aspect="auto"))
-    cb_rt.ax.axhline(cfg.RIDGE_THRESHOLD, color="cyan", linewidth=1.5, linestyle="--")
-    cb_rt.ax.annotate(f"t={cfg.RIDGE_THRESHOLD}", xy=(1.05, cfg.RIDGE_THRESHOLD),
-                      xycoords=("axes fraction", "data"), fontsize=5, color="cyan", va="center")
-    style_axes(axes[1, 1], f"⑧ Ridge Response  (t={cfg.RIDGE_THRESHOLD})")
-    axes[1, 1].set_xticks([]); axes[1, 1].set_yticks([])
+    _img(axes[1, 1], closed.astype(np.uint8),   "8. Along-Wall Gap Fill",  cmap="gray", extent=ext)
+    _img(axes[1, 2], skeleton.astype(np.uint8), "9. Skeleton",             cmap="gray", extent=ext)
 
     labeled_disp = labeled.astype(float)
     labeled_disp[labeled == 0] = np.nan
-    _cb(axes[1, 2], axes[1, 2].imshow(labeled_disp, origin="upper", cmap="tab20",
+    _cb(axes[1, 3], axes[1, 3].imshow(labeled_disp, origin="upper", cmap="tab20",
                                        extent=ext, aspect="auto", interpolation="nearest"))
-    style_axes(axes[1, 2], f"⑨ Labeled Components  ({labeled.max()})")
-    axes[1, 2].set_xticks([]); axes[1, 2].set_yticks([])
+    style_axes(axes[1, 3], f"10. Labeled Components  ({labeled.max()})")
+    axes[1, 3].set_xticks([]); axes[1, 3].set_yticks([])
 
-    _img(axes[1, 3], closed.astype(np.uint8),   "⑩ Hough Reconstruction",  cmap="gray", extent=ext)
-    _img(axes[1, 4], skeleton.astype(np.uint8), "⑪ Skeleton",     cmap="gray", extent=ext)
-
-    # Panel ⑫ — pairs on hillshaded DTM
-    axes[1, 5].imshow(hs_raw, origin="upper", extent=ext, aspect="auto")
+    # Panel 11. — pairs on hillshaded DTM
+    axes[1, 4].imshow(hs_raw, origin="upper", extent=ext, aspect="auto")
     COLORS = ["#ff4444", "#4499ff"]
 
     # Pixel → metres conversion at the window centre latitude
@@ -238,7 +235,7 @@ def generate_pipeline_figure(coord: dict, dtm_path: str, output_dir: Path) -> No
     for pair in pairs[:12]:
         geo_segs = pair_to_geo(pair, extent, raw.shape)
         for k, ((gx0, gy0), (gx1, gy1)) in enumerate(geo_segs):
-            axes[1, 5].plot([gx0, gx1], [gy0, gy1],
+            axes[1, 4].plot([gx0, gx1], [gy0, gy1],
                             color=COLORS[k], linewidth=2.0, alpha=0.85)
 
         # Spacing label at the midpoint between the two line midpoints
@@ -249,7 +246,7 @@ def generate_pipeline_figure(coord: dict, dtm_path: str, output_dir: Path) -> No
         label_lon = (mid_ax + mid_bx) / 2
         label_lat = (mid_ay + mid_by) / 2
         spacing_m = pair["spacing"] * m_per_px
-        axes[1, 5].annotate(
+        axes[1, 4].annotate(
             f"{spacing_m:.0f} m",
             xy=(label_lon, label_lat),
             fontsize=6.5, color="white", fontweight="bold",
@@ -258,8 +255,14 @@ def generate_pipeline_figure(coord: dict, dtm_path: str, output_dir: Path) -> No
                       alpha=0.6, edgecolor="none"),
         )
 
-    style_axes(axes[1, 5],
-               f"⑫ Detected Pairs  ({len(pairs)} pair{'s' if len(pairs) != 1 else ''})")
+    style_axes(axes[1, 4],
+               f"11. Detected Pairs  ({len(pairs)} pair{'s' if len(pairs) != 1 else ''})")
+    axes[1, 4].set_xticks([]); axes[1, 4].set_yticks([])
+
+    # Panel 12. — visual diagnostic hillshade next to detected pairs
+    axes[1, 5].imshow(hs_perp32, origin="upper", cmap="gray", extent=ext, aspect="auto",
+                      vmin=0, vmax=1)
+    style_axes(axes[1, 5], "12. Hillshade ⊥ 32°  (az 122°, alt 20°)")
     axes[1, 5].set_xticks([]); axes[1, 5].set_yticks([])
 
     # Uniform dark frame

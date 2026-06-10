@@ -256,20 +256,29 @@ def median_smooth_windowed(data, nodata=parameters.NODATA, radius=parameters.MED
     return result
 
 
-def local_relief_model(data, radius=parameters.LRM_RADIUS, nodata=parameters.NODATA):
+def local_relief_model(data, radius=parameters.LRM_RADIUS, nodata=parameters.NODATA,
+                       method=parameters.LRM_METHOD):
     """
-    Local Relief Model: subtract a large-scale mean surface.
-    Uses a square box filter of radius `radius` cells, masking nodata.
+    Local Relief Model: subtract a large-scale surface estimate.
+
+    method='mean'   — nodata-aware box-filter mean (default).
+    method='median' — nodata-aware median filter; preserves sharp edges better.
     """
     mask = data == nodata
-    valid = np.where(mask, 0, data)
-    size = 2 * radius + 1
-    kernel = np.ones((size, size)) / (size * size)
-    local_mean = convolve2d(valid, kernel, mode='same', boundary='symm')
-    weight = convolve2d((~mask).astype(float), kernel, mode='same', boundary='symm')
-    with np.errstate(divide='ignore', invalid='ignore'):
-        local_mean = np.where(weight > 0, local_mean / weight, 0)
-    lrm = np.where(~mask, data - local_mean, 0)
+
+    if method == "median":
+        local_surface = median_smooth_windowed(data, nodata=nodata, radius=radius)
+        lrm = np.where(~mask, data - local_surface, 0)
+    else:
+        valid = np.where(mask, 0, data)
+        size = 2 * radius + 1
+        kernel = np.ones((size, size)) / (size * size)
+        local_mean = convolve2d(valid, kernel, mode='same', boundary='symm')
+        weight = convolve2d((~mask).astype(float), kernel, mode='same', boundary='symm')
+        with np.errstate(divide='ignore', invalid='ignore'):
+            local_mean = np.where(weight > 0, local_mean / weight, 0)
+        lrm = np.where(~mask, data - local_mean, 0)
+
     lrm[mask] = nodata
     return lrm
 
