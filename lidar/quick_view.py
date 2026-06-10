@@ -11,10 +11,11 @@ import numpy as np
 from osgeo import gdal
 gdal.UseExceptions()
 import matplotlib.pyplot as plt
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import parameters
 
-def quick_view_dtm(input_path, sample_step=10, cmap='viridis', figsize=(12, 8), outpath = None):
+def quick_view_dtm(input_path, sample_step=10, cmap='viridis', figsize=(12, 8), outpath=None, workers=1):
     """
     Display a low‑resolution version of a DTM with coordinate axes.
 
@@ -48,8 +49,42 @@ def quick_view_dtm(input_path, sample_step=10, cmap='viridis', figsize=(12, 8), 
     print(f"[3] Downsampled size: {buf_xsize} x {buf_ysize}  (step={sample_step})")
 
     # Read using positional arguments: (xoff, yoff, xsize, ysize, buf_xsize, buf_ysize)
-    print(f"[4] Reading array (this may take a moment)…")
-    data = band.ReadAsArray(0, 0, full_xsize, full_ysize, buf_xsize, buf_ysize)
+    # workers > 1: split into horizontal strips, each opened by its own GDAL handle
+    # and decompress tiles in parallel via GDAL_NUM_THREADS.
+    print(f"[4] Reading array (workers={workers}, this may take a moment)…")
+    gdal.SetConfigOption('GDAL_NUM_THREADS', str(workers))
+
+    if workers > 1:
+        n_strips = workers
+        strip_rows = max(1, (full_ysize + n_strips - 1) // n_strips)
+
+        completed = [0]
+
+        def _read_strip(strip_idx):
+            y_off  = strip_idx * strip_rows
+            y_size = min(strip_rows, full_ysize - y_off)
+            if y_size <= 0:
+                return None
+            buf_y  = max(1, round(y_size / full_ysize * buf_ysize))
+            ds_loc = gdal.Open(input_path)
+            arr    = ds_loc.GetRasterBand(1).ReadAsArray(
+                0, y_off, full_xsize, y_size, buf_xsize, buf_y)
+            ds_loc = None
+            completed[0] += 1
+            print(f"[4] strip {completed[0]}/{n_strips} done", flush=True)
+            return arr
+
+        with ThreadPoolExecutor(max_workers=workers) as ex:
+            futures = {ex.submit(_read_strip, i): i for i in range(n_strips)}
+            strips_by_idx = {}
+            for fut in as_completed(futures):
+                strips_by_idx[futures[fut]] = fut.result()
+            strips = [strips_by_idx[i] for i in range(n_strips)]
+        data = np.vstack([s for s in strips if s is not None])
+    else:
+        data = band.ReadAsArray(0, 0, full_xsize, full_ysize, buf_xsize, buf_ysize)
+
+    gdal.SetConfigOption('GDAL_NUM_THREADS', None)
     print(f"[4] Read complete — dtype: {data.dtype}, shape: {data.shape}")
     print(f"[4] Raw min: {data.min():.2f}  max: {data.max():.2f}  mean: {data.mean():.2f}")
 
@@ -119,7 +154,10 @@ if __name__ == "__main__":
                         help="Colormap, e.g., terrain, jet, viridis")
     parser.add_argument("--figsize", type=str, default="12,8",
                         help="Figure size in inches: width,height")
+    parser.add_argument("--workers", type=int, default=4,
+                        help="Parallel threads for reading (default 4)")
     args = parser.parse_args()
 
     figsize = tuple(map(int, args.figsize.split(',')))
-    quick_view_dtm(args.input, sample_step=args.step, cmap=args.cmap, figsize=figsize, outpath="data/quick_view.png")
+    quick_view_dtm(args.input, sample_step=args.step, cmap=args.cmap,
+                   figsize=figsize, outpath="data/quick_view.png", workers=args.workers)
