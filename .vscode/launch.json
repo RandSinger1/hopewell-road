@@ -7,8 +7,10 @@
             "request": "launch",
             "module": "app.server",
             "args": [
-                "--folder", "data/locations",
-                "--dtm", "data/loaded_tiles/Whole_Road/merged_dtm.tif"
+                //"--folder", "data/locations",
+                "--dtm", "data/loaded_tiles/Whole_Road/merged_dtm.tif",
+                "--mode", "circleville"
+                
             ],
             "cwd": "${workspaceFolder}",
             "console": "integratedTerminal",
@@ -20,12 +22,14 @@
             "request": "launch",
             "module": "lidar.run_pipeline",
             "args": [
-                "Circleville_Road",
-                "--area-splits", "10",
+                "Circleville_Road_7",
+                //"--area-splits", "10",
                 "--pdal-workers", "10",
-                "--skip-download",
                 "--skip-collect",
-                "--skip-merge"
+                //"--skip-download",
+                //"--skip-pdal",
+                "--skip-merge",
+                "--skip-view"
             ],
             "cwd": "${workspaceFolder}",
             "console": "integratedTerminal",
@@ -38,7 +42,13 @@
             "module": "lidar.run_pipeline",
             "args": [
                 "full_road",
-                "--area-splits", "30"
+                "--area-splits", "10",
+                "--pdal-workers", "10",
+                "--skip-collect",
+                "--skip-download",
+                "--skip-pdal",
+                //"--skip-merge",
+                "--skip-view"
             ],
             "cwd": "${workspaceFolder}",
             "console": "integratedTerminal",
@@ -51,7 +61,14 @@
             "module": "lidar.run_pipeline",
             "args": [
                 "Hart_Island",
-                "--separate-year"
+                "--separate-year",
+                "--skip-collect",
+                "--skip-download",
+                "--skip-pdal",
+                "--skip-merge",
+                //"--skip-view",
+                "--pdal-workers", "10",
+                "--sample-step", "10"
             ],
             "cwd": "${workspaceFolder}",
             "console": "integratedTerminal",
@@ -71,7 +88,9 @@
             "type": "debugpy",
             "request": "launch",
             "module": "road_model.range_searcher",
-            "args": ["--max_workers", "4"],
+            "args": ["--preview",
+                "--max_workers", "10",
+                "--mode", "circleville"],
             "cwd": "${workspaceFolder}",
             "console": "integratedTerminal",
             "justMyCode": false
@@ -100,8 +119,9 @@
             "request": "launch",
             "module": "lidar.quick_view",
             "args": [
-                "--input", "data/loaded_tiles/Hart_Island_2023/merged_dtm.tif",
-                "--step", "10"
+                "--input", "data/loaded_tiles/Whole_Road/merged_dtm.tif",
+                "--step", "50",
+                "--workers", "8"
             ],
             "cwd": "${workspaceFolder}",
             "console": "integratedTerminal",

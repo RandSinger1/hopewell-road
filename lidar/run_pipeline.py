@@ -129,7 +129,7 @@ def step_merge(areas: list[str], sub_areas: list[str], separate_year: bool, work
     merge_dtms(sub_areas, out_path, workers=workers)
 
 
-def step_view(areas: list[str], sub_areas: list[str], separate_year: bool):
+def step_view(areas: list[str], sub_areas: list[str], separate_year: bool, sample_step: int):
     print("\n=== Step 5 — quick view ===")
     out_dir = _merged_output_dir(areas)
     label = out_dir.name  # e.g. "Hart_Island", "Whole_Road"
@@ -154,9 +154,11 @@ def step_view(areas: list[str], sub_areas: list[str], separate_year: bool):
         dtm_path = str(tifs[0]) if tifs else parameters.REPORT_DTM_PATH
         renders.append((dtm_path, f"data/imgs/quick_view_{sub_areas[0]}.png"))
 
+    show_cities = (label == "Whole_Road")
     for dtm_path, out_png in renders:
         print(f"  Rendering {dtm_path} → {out_png}")
-        quick_view_dtm(dtm_path, sample_step=1000, cmap="terrain", outpath=out_png)
+        quick_view_dtm(dtm_path, sample_step=sample_step, cmap="terrain", outpath=out_png,
+                       show_cities=show_cities)
         print(f"  Saved: {out_png}")
 
 
@@ -211,6 +213,10 @@ def main():
         "--pdal-workers", type=int, default=5,
         help="Parallel PDAL processes (default 5)",
     )
+    parser.add_argument(
+        "--sample-step", type=int, default=1000,
+        help="Pixel sampling step for quick view (default 1000)",
+    )
     args = parser.parse_args()
 
     # Expand aliases (full_road → Hopewell_Road Circleville_Road)
@@ -241,7 +247,7 @@ def main():
         step_merge(areas, all_sub_areas, args.separate_year, workers=args.pdal_workers)
 
     if not args.skip_view:
-        step_view(areas, all_sub_areas, args.separate_year)
+        step_view(areas, all_sub_areas, args.separate_year, args.sample_step)
 
     print("\n=== Pipeline complete ===")
 

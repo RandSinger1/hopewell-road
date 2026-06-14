@@ -15,7 +15,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import parameters
 
-def quick_view_dtm(input_path, sample_step=10, cmap='viridis', figsize=(12, 8), outpath=None, workers=1):
+def quick_view_dtm(input_path, sample_step=10, cmap='viridis', figsize=(12, 8), outpath=None, workers=1, show_cities=True):
     """
     Display a low‑resolution version of a DTM with coordinate axes.
 
@@ -132,12 +132,13 @@ def quick_view_dtm(input_path, sample_step=10, cmap='viridis', figsize=(12, 8), 
     ax.set_xlabel('X coordinate (map units)')
     ax.set_ylabel('Y coordinate (map units)')
     ax.set_title(f"DTM: {input_path} (low-res, step={sample_step})")
-    circleville =(39.6,-82.9)
-    newark = (40.0,-82.4)
-    chilicothe = (39.3,-83.0)
-    plt.plot(circleville[1], circleville[0], 'ro')
-    plt.plot(newark[1], newark[0], 'ro')
-    plt.plot(chilicothe[1], chilicothe[0], 'ro')
+    if show_cities:
+        circleville = (39.6, -82.9)
+        newark      = (40.0, -82.4)
+        chilicothe  = (39.3, -83.0)
+        plt.plot(circleville[1], circleville[0], 'ro')
+        plt.plot(newark[1],      newark[0],      'ro')
+        plt.plot(chilicothe[1],  chilicothe[0],  'ro')
     plt.tight_layout()
     if outpath:
         plt.savefig(outpath)
