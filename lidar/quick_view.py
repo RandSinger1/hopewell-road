@@ -135,7 +135,7 @@ def quick_view_dtm(input_path, sample_step=10, cmap='viridis', figsize=(12, 8), 
     if show_cities:
         circleville = (39.6, -82.9)
         newark      = (40.0, -82.4)
-        chillicothe  = (39.3, -83.0)
+        chillicothe  = (39.3,-82.9)
         plt.plot(circleville[1], circleville[0], 'ro')
         plt.plot(newark[1],      newark[0],      'ro')
         plt.plot(chillicothe[1],  chillicothe[0],  'ro')

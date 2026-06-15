@@ -17,7 +17,7 @@ import json
 # ── Named coordinates ─────────────────────────────────────────────────────────
 CIRCLEVILLE = (39.5,  -82.9)   # (lat, lon)
 NEWARK      = (40.0,  -82.4)
-CHILLICOTHE  = (39.3,  -82.9)
+CHILLICOTHE  = (39.3,-82.9)
 
 
 # ── Tile generators ───────────────────────────────────────────────────────────

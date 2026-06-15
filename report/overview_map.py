@@ -31,7 +31,7 @@ import parameters
 _CITIES = {
     "Newark":      (40.0, -82.4),
     "Circleville": (39.6,    -82.9),
-    "Chillicothe": (39.3,  -82.9),
+    "Chillicothe": (39.3,-82.9),
 }
 
 _HALF_LINE_M = 5_000
