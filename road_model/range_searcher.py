@@ -9,14 +9,15 @@ import matplotlib.patches as mpatches
 
 import parameters
 from road_model.ridge_detection import search_region
-from utils import convert_meters_degrees_pixels, METERS, DEGREES
+from utils import (convert_meters_degrees_pixels, METERS, DEGREES,
+                   make_parabola, make_line)
 
 import json
 
 # ── Named coordinates ─────────────────────────────────────────────────────────
-CIRCLEVILLE = (39.6, -82.9)   # (lat, lon)
+CIRCLEVILLE = (39.5,  -82.9)   # (lat, lon)
 NEWARK      = (40.0,  -82.4)
-CHILICOTHE  = (39.3,  -82.9)
+CHILLICOTHE  = (39.3,  -82.9)
 
 
 # ── Tile generators ───────────────────────────────────────────────────────────
@@ -57,37 +58,6 @@ def tile_polygon(polygon_vertices, size_x, size_y, overlap,
             x += step_x
         y -= step_y
     return tiles
-
-
-def make_parabola(a, b, c, x_offset):
-    """
-    Build (curve_func, curve_deriv) for  y = a*(x-x0)^2 + b*(x-x0) + c.
-    """
-    def curve_func(x):
-        dx = x - x_offset
-        return a * dx**2 + b * dx + c
-
-    def curve_deriv(x):
-        dx = x - x_offset
-        return 2 * a * dx + b
-
-    return curve_func, curve_deriv
-
-
-def make_line(x0, y0, x1, y1):
-    """
-    Build (curve_func, curve_deriv) for the straight line through two lon/lat points.
-    x0,y0 and x1,y1 are (lon, lat).
-    """
-    slope = (y1 - y0) / (x1 - x0)
-
-    def curve_func(x):
-        return slope * (x - x0) + y0
-
-    def curve_deriv(_x):
-        return slope
-
-    return curve_func, curve_deriv
 
 
 def tile_curve(curve_func, curve_deriv, x_start, x_end,
@@ -152,28 +122,30 @@ def tile_curve(curve_func, curve_deriv, x_start, x_end,
 
 def _tiles_polygon(size_x, size_y, overlap):
     """Whole study-area polygon, uniform TARGET_ANGLE."""
-    polygon_vertices = [CIRCLEVILLE, NEWARK, CHILICOTHE]
+    polygon_vertices = [CIRCLEVILLE, NEWARK, CHILLICOTHE]
     return tile_polygon(polygon_vertices, size_x, size_y, overlap)
 
 
 def _tiles_circleville(size_x, size_y, overlap, half_width_meters=5000):
     """Parabolic corridor from Circleville to Newark."""
     half_width_deg = convert_meters_degrees_pixels(METERS, DEGREES, 0, half_width_meters)[1]
-    clon = CIRCLEVILLE[1]
-    curve_func, curve_deriv = make_parabola(1.7, -.1, 39.6, x_offset=clon)
+    curve_func, curve_deriv = make_parabola(
+        parameters.PARABOLA_A, parameters.PARABOLA_B, parameters.PARABOLA_C,
+        x_offset=parameters.PARABOLA_X_OFFSET,
+    )
     return tile_curve(
         curve_func, curve_deriv,
-        x_start=clon, x_end=NEWARK[1],
+        x_start=parameters.PARABOLA_X_OFFSET, x_end=NEWARK[1],
         half_width_deg=half_width_deg,
         size_x=size_x, size_y=size_y, overlap=overlap,
     )
 
 
-def _tiles_chilicothe(size_x, size_y, overlap, half_width_meters=5000):
-    """Straight-line corridor from Chillicothe to Circleville."""
+def _tiles_chillicothe(size_x, size_y, overlap, half_width_meters=5000):
+    """Straight-line corridor from Chillicothe to Newark."""
     half_width_deg = convert_meters_degrees_pixels(METERS, DEGREES, 0, half_width_meters)[1]
-    x0, y0 = CHILICOTHE[1], CHILICOTHE[0]
-    x1, y1 = CIRCLEVILLE[1], CIRCLEVILLE[0]
+    x0, y0 = CHILLICOTHE[1], CHILLICOTHE[0]
+    x1, y1 = NEWARK[1], NEWARK[0]
     curve_func, curve_deriv = make_line(x0, y0, x1, y1)
     return tile_curve(
         curve_func, curve_deriv,
@@ -186,7 +158,7 @@ def _tiles_chilicothe(size_x, size_y, overlap, half_width_meters=5000):
 MODES = {
     'polygon':      _tiles_polygon,
     'circleville':  _tiles_circleville,
-    'chilicothe':   _tiles_chilicothe,
+    'chillicothe':   _tiles_chillicothe,
 }
 
 
@@ -195,7 +167,7 @@ MODES = {
 _CITIES = {
     'Circleville': CIRCLEVILLE,
     'Newark':      NEWARK,
-    'Chillicothe': CHILICOTHE,
+    'Chillicothe': CHILLICOTHE,
 }
 
 def preview_tiles(tiles, mode, size_x, size_y):
@@ -234,8 +206,8 @@ def preview_tiles(tiles, mode, size_x, size_y):
 
     # Straight line Newark → Chillicothe
     ax.plot(
-        [NEWARK[1], CHILICOTHE[1]],
-        [NEWARK[0], CHILICOTHE[0]],
+        [NEWARK[1], CHILLICOTHE[1]],
+        [NEWARK[0], CHILLICOTHE[0]],
         color='darkorange', linewidth=1.5, linestyle='--', zorder=5,
         label='Newark–Chillicothe',
     )
@@ -311,7 +283,7 @@ if __name__ == '__main__':
         '--mode', '-m',
         choices=list(MODES),
         default='polygon',
-        help='Search region: polygon (default), circleville, or chilicothe')
+        help='Search region: polygon (default), circleville, or chillicothe')
     parser.add_argument(
         '--max_workers', '-w',
         type=int, default=parameters.SCAN_MAX_WORKERS,
