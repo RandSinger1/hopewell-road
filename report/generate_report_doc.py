@@ -48,7 +48,7 @@ def add_pipeline_steps_detail(doc, site_dir):
     add_heading(doc, "3.3  Processing Pipeline Illustrated: Van Voorhis Wall", level=2)
     add_para(doc, (
         "The Van Voorhis Wall site serves as the ground-truth validation case for the "
-        "detection pipeline.  The following panels walk through each of the twelve "
+        "detection pipeline.  The following panels walk through each of the thirteen "
         "processing stages in sequence, with the parameter values and algorithmic "
         "rationale documented for each step."
     ))
@@ -147,8 +147,23 @@ def add_pipeline_steps_detail(doc, site_dir):
             ),
         ),
         (
-            "08_hough_reconstruction",
-            "Step 8: Along-Wall Gap Filling",
+            "08_binary_mask",
+            "Step 8: Binary Mask",
+            (
+                f"The initial binary ridge mask: all pixels whose Frangi response exceeds the amplitude "
+                f"threshold (t = {parameters.RIDGE_THRESHOLD}) AND whose Hessian orientation deviates no "
+                f"more than ±{parameters.ANGLE_TOLERANCE:.0f}° from the target bearing "
+                f"({parameters.TARGET_ANGLE:.0f}°) are set to 1.  All other pixels are 0.  "
+                f"This is the raw candidate set prior to any morphological processing.  "
+                f"True earthwork ridges should appear as oriented bright ribbons; isotropic noise, "
+                f"mis-oriented features, and sub-threshold returns are suppressed.  "
+                f"Fragmentation and gaps due to partially-occluded or degraded sections of earthwork "
+                f"are visible at this stage and are addressed in the next step."
+            ),
+        ),
+        (
+            "09_gap_fill",
+            "Step 9: Along-Wall Gap Filling",
             (
                 f"The binary mask (pixels passing both the amplitude threshold and the orientation filter) "
                 f"is processed by an along-wall integration step to bridge gaps caused by partially "
@@ -161,8 +176,8 @@ def add_pipeline_steps_detail(doc, site_dir):
             ),
         ),
         (
-            "09_skeleton",
-            "Step 9: Skeleton",
+            "10_skeleton",
+            "Step 10: Skeleton",
             (
                 f"The gap-filled binary mask is thinned to a one-pixel-wide medial-axis skeleton "
                 f"(scikit-image medial_axis).  The skeleton collapses ridge width to a single "
@@ -173,8 +188,8 @@ def add_pipeline_steps_detail(doc, site_dir):
             ),
         ),
         (
-            "10_labeled_components",
-            "Step 10: Labeled Components",
+            "11_labeled_components",
+            "Step 11: Labeled Components",
             (
                 f"The skeleton is partitioned into connected components using a standard flood-fill.  "
                 f"Each colour represents one candidate ridge segment.  The component count shown in "
@@ -182,8 +197,8 @@ def add_pipeline_steps_detail(doc, site_dir):
             ),
         ),
         (
-            "11_detected_pairs",
-            "Step 11: Detected Pairs",
+            "12_detected_pairs",
+            "Step 12: Detected Pairs",
             (
                 f"Each skeleton component is fitted with a straight line by total-least-squares "
                 f"regression (cv2.fitLine).  All pairs of fitted lines are then tested against the "
@@ -198,7 +213,7 @@ def add_pipeline_steps_detail(doc, site_dir):
             ),
         ),
         (
-            "12_hillshade_perp32",
+            "13_hillshade_perp32",
             "Visual Diagnostic: Hillshade Perpendicular to 32°",
             (
                 f"A directional hillshade with illumination from azimuth 122° (perpendicular to the "
@@ -297,8 +312,16 @@ add_para(doc, (
     "the USGS RockyWeb delivery service."
 ))
 add_para(doc, (
-    "The study area encompasses the triangle with vertices in Newark (40.0, -82.4), "
-    "Chillicothe (39.6, -82.9), and Circleville (39.6, -82.9)."
+    f"The study area encompasses the triangle with vertices at Newark "
+    f"({parameters.NEWARK_COORD[0]}, {parameters.NEWARK_COORD[1]}), "
+    f"Chillicothe ({parameters.CHILLICOTHE_COORD[0]}, {parameters.CHILLICOTHE_COORD[1]}), "
+    f"and Circleville ({parameters.CIRCLEVILLE_COORD[0]}, {parameters.CIRCLEVILLE_COORD[1]}).  "
+    f"The search corridor is defined by a parabola y = a*(x-x0)^2 + b*(x-x0) + c "
+    f"anchored at Circleville (x0 = {parameters.PARABOLA_X_OFFSET}, c = {parameters.PARABOLA_C}) "
+    f"with coefficients a = {parameters.PARABOLA_A} and b = {parameters.PARABOLA_B}, "
+    f"chosen so the curve passes through Newark at the expected corridor bearing.  "
+    f"Tiles are included if their centre falls within {parameters.CORRIDOR_HALF_WIDTH_M/1000:.1f} km "
+    f"({parameters.CORRIDOR_HALF_WIDTH_M:,.0f} m) of this centreline."
 ))
 
 
@@ -374,6 +397,15 @@ param_rows = [
     ("Spacing tolerance",        f"±{int(parameters.SPACING_TOLERANCE*100)}%"),
     ("Pairing angle tolerance",  f"±{parameters.PAIRING_ANGLE_TOLERANCE_DEG}°"),
     ("Min. overlap ratio",       f"{int(parameters.OVERLAP_RATIO*100)}%"),
+    # ── Corridor / search geometry ─────────────────────────────────────────────
+    ("Circleville anchor (lat, lon)", f"{parameters.CIRCLEVILLE_COORD[0]}, {parameters.CIRCLEVILLE_COORD[1]}"),
+    ("Newark anchor (lat, lon)",      f"{parameters.NEWARK_COORD[0]}, {parameters.NEWARK_COORD[1]}"),
+    ("Chillicothe anchor (lat, lon)", f"{parameters.CHILLICOTHE_COORD[0]}, {parameters.CHILLICOTHE_COORD[1]}"),
+    ("Corridor centreline",
+     f"y = {parameters.PARABOLA_A}*(x - {parameters.PARABOLA_X_OFFSET})^2 "
+     f"+ {parameters.PARABOLA_B}*(x - {parameters.PARABOLA_X_OFFSET}) "
+     f"+ {parameters.PARABOLA_C}"),
+    ("Corridor half-width (search dist.)", f"{parameters.CORRIDOR_HALF_WIDTH_M:,.0f} m ({parameters.CORRIDOR_HALF_WIDTH_M/1000:.1f} km)"),
 ]
 add_table(doc, ["Parameter", "Value"], param_rows)
 doc.add_paragraph()
@@ -450,12 +482,13 @@ for i, coord in enumerate(_sorted_coords, start=1):
     add_figure(
         doc,
         site_dir / "pipeline_steps.png",
-        f"{name}: processing pipeline (2 rows x 6 panels).  "
-        "Top row (left to right): raw DTM elevation (displayed as hillshade), "
-        "median-smoothed DTM hillshade, Local Relief Model, Frangi multi-scale ridge response, "
-        "Frangi response with amplitude acceptance threshold, Hessian ridge orientation.  "
-        "Bottom row: angle deviation from target bearing, along-wall gap-filled binary mask, "
-        "medial-axis skeleton, labelled skeleton components, "
+        f"{name}: processing pipeline (2 rows x 7 panels).  "
+        "Top row (left to right): raw DTM hillshade, median-smoothed DTM hillshade, "
+        "Local Relief Model, Frangi multi-scale ridge response, "
+        "Frangi response with amplitude threshold, Hessian ridge orientation, "
+        "angle deviation from target bearing.  "
+        "Bottom row: initial binary mask (amplitude + orientation filter), "
+        "along-wall gap-filled binary mask, medial-axis skeleton, labelled skeleton components, "
         "detected parallel wall pairs, hillshade perpendicular to the 32 degree bearing (visual diagnostic).",
     )
 

@@ -27,6 +27,7 @@ from pathlib import Path
 
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib.transforms import Bbox
 
 from road_model.process_dtm import (
     getGTAndBand, get_window,
@@ -47,28 +48,31 @@ _STEP_LABELS = [
     "5. Ridge Amplitude Threshold",
     "6. Hessian Orientation",
     "7. Angle Deviation",
-    "8. Along-Wall Gap Fill",
-    "9. Skeleton",
-    "10. Labeled Components",
-    "11. Detected Pairs",
-    "12. Hillshade ⊥ 32°",
+    "8. Binary Mask",
+    "9. Along-Wall Gap Fill",
+    "10. Skeleton",
+    "11. Labeled Components",
+    "12. Detected Pairs",
+    "13. Hillshade ⊥ 32°",
 ]
 
-# Slugs follow axis order (left-to-right, top-to-bottom) but keep the original
-# file-name prefixes so generate_report_doc.py can find each image by slug.
+# Slugs follow flat axis order (left-to-right, top-to-bottom in a 2×7 grid).
+# None marks the unused last cell in row 1.
 _STEP_SLUGS = [
-    "01_raw_dtm",
-    "02_median_smooth",
-    "03_local_relief_model",
-    "04_frangi_ridge_response",
-    "05_ridge_response",       # axis [0,4] — amplitude threshold (was row-2 pos 8)
-    "06_hessian_orientation",  # axis [0,5] — moved from row-1 pos 5
-    "07_angle_deviation",
-    "08_hough_reconstruction", # axis [1,1] — gap fill (was pos 10)
-    "09_skeleton",             # axis [1,2]
-    "10_labeled_components",   # axis [1,3] — follows skeleton
-    "11_detected_pairs",       # axis [1,4]
-    "12_hillshade_perp32",     # axis [1,5] — visual diagnostic at end
+    "01_raw_dtm",               # [0,0]
+    "02_median_smooth",         # [0,1]
+    "03_local_relief_model",    # [0,2]
+    "04_frangi_ridge_response", # [0,3]
+    "05_ridge_response",        # [0,4] — amplitude threshold
+    "06_hessian_orientation",   # [0,5]
+    "07_angle_deviation",       # [0,6] — moved to complete row 0
+    "08_binary_mask",           # [1,0] — NEW
+    "09_gap_fill",              # [1,1]
+    "10_skeleton",              # [1,2]
+    "11_labeled_components",    # [1,3]
+    "12_detected_pairs",        # [1,4]
+    "13_hillshade_perp32",      # [1,5]
+    None,                       # [1,6] — empty cell
 ]
 
 
@@ -133,9 +137,9 @@ def generate_pipeline_figure(coord: dict, dtm_path: str, output_dir: Path) -> No
     pairs = remove_invalid_pairs(pairs, angle_tolerance=cfg.ANGLE_TOLERANCE,
                                   target_angle=cfg.TARGET_ANGLE)
 
-    # ── Build figure  (2 rows × 6 columns) ───────────────────────────────────
+    # ── Build figure  (2 rows × 7 columns) ───────────────────────────────────
     print(f"  [pipeline] composing figure …")
-    fig, axes = plt.subplots(2, 6, figsize=(26, 9))
+    fig, axes = plt.subplots(2, 7, figsize=(30, 9))
     fig.patch.set_facecolor("#1a1a1a")
     fig.suptitle(
         f"LiDAR Processing Pipeline  ·  {name.replace('_', ' ')}  "
@@ -160,9 +164,12 @@ def generate_pipeline_figure(coord: dict, dtm_path: str, output_dir: Path) -> No
     diff_rad = np.minimum(diff_rad, np.pi - diff_rad)
     diff_disp = np.where(ridge_present, np.rad2deg(diff_rad), np.nan)
 
+    _ax_colorbars = {}
+
     def _cb(ax, im, **kw):
         cb = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.03, **kw)
         cb.ax.yaxis.set_tick_params(colors="gray", labelsize=6)
+        _ax_colorbars[ax] = cb
         return cb
 
     # ── Row 1: pre-processing → amplitude gate → orientation ─────────────────
@@ -202,26 +209,27 @@ def generate_pipeline_figure(coord: dict, dtm_path: str, output_dir: Path) -> No
     style_axes(axes[0, 5], f"6. Hessian Orientation  (target {cfg.TARGET_ANGLE:.0f}°)")
     axes[0, 5].set_xticks([]); axes[0, 5].set_yticks([])
 
-    # ── Row 2: orientation filter → gap fill → skeleton → labels → pairs + diag
-    cb_diff = _cb(axes[1, 0], axes[1, 0].imshow(diff_disp, origin="upper", cmap="RdYlGn_r",
+    cb_diff = _cb(axes[0, 6], axes[0, 6].imshow(diff_disp, origin="upper", cmap="RdYlGn_r",
                                                   vmin=0, vmax=90, extent=ext, aspect="auto"))
     cb_diff.ax.axhline(cfg.ANGLE_TOLERANCE, color="cyan", linewidth=1.2, linestyle="--")
     cb_diff.ax.annotate(f"±{cfg.ANGLE_TOLERANCE:.0f}°", xy=(1.05, cfg.ANGLE_TOLERANCE),
                         xycoords=("axes fraction", "data"), fontsize=5, color="cyan", va="center")
-    style_axes(axes[1, 0], f"7. Angle Deviation  (tol ±{cfg.ANGLE_TOLERANCE:.0f}°)")
-    axes[1, 0].set_xticks([]); axes[1, 0].set_yticks([])
+    style_axes(axes[0, 6], f"7. Angle Deviation  (tol ±{cfg.ANGLE_TOLERANCE:.0f}°)")
+    axes[0, 6].set_xticks([]); axes[0, 6].set_yticks([])
 
-    _img(axes[1, 1], closed.astype(np.uint8),   "8. Along-Wall Gap Fill",  cmap="gray", extent=ext)
-    _img(axes[1, 2], skeleton.astype(np.uint8), "9. Skeleton",             cmap="gray", extent=ext)
+    # ── Row 2: binary mask → gap fill → skeleton → labels → pairs + diag ────────
+    _img(axes[1, 0], binary.astype(np.uint8),   "8. Binary Mask",          cmap="gray", extent=ext)
+    _img(axes[1, 1], closed.astype(np.uint8),   "9. Along-Wall Gap Fill",  cmap="gray", extent=ext)
+    _img(axes[1, 2], skeleton.astype(np.uint8), "10. Skeleton",            cmap="gray", extent=ext)
 
     labeled_disp = labeled.astype(float)
     labeled_disp[labeled == 0] = np.nan
     _cb(axes[1, 3], axes[1, 3].imshow(labeled_disp, origin="upper", cmap="tab20",
                                        extent=ext, aspect="auto", interpolation="nearest"))
-    style_axes(axes[1, 3], f"10. Labeled Components  ({labeled.max()})")
+    style_axes(axes[1, 3], f"11. Labeled Components  ({labeled.max()})")
     axes[1, 3].set_xticks([]); axes[1, 3].set_yticks([])
 
-    # Panel 11. — pairs on hillshaded DTM
+    # Panel 12. — pairs on hillshaded DTM
     axes[1, 4].imshow(hs_raw, origin="upper", extent=ext, aspect="auto")
     COLORS = ["#ff4444", "#4499ff"]
 
@@ -256,14 +264,16 @@ def generate_pipeline_figure(coord: dict, dtm_path: str, output_dir: Path) -> No
         )
 
     style_axes(axes[1, 4],
-               f"11. Detected Pairs  ({len(pairs)} pair{'s' if len(pairs) != 1 else ''})")
+               f"12. Detected Pairs  ({len(pairs)} pair{'s' if len(pairs) != 1 else ''})")
     axes[1, 4].set_xticks([]); axes[1, 4].set_yticks([])
 
-    # Panel 12. — visual diagnostic hillshade next to detected pairs
+    # Panel 13. — visual diagnostic hillshade next to detected pairs
     axes[1, 5].imshow(hs_perp32, origin="upper", cmap="gray", extent=ext, aspect="auto",
                       vmin=0, vmax=1)
-    style_axes(axes[1, 5], "12. Hillshade ⊥ 32°  (az 122°, alt 20°)")
+    style_axes(axes[1, 5], "13. Hillshade ⊥ 32°  (az 122°, alt 20°)")
     axes[1, 5].set_xticks([]); axes[1, 5].set_yticks([])
+
+    axes[1, 6].set_visible(False)
 
     # Uniform dark frame
     for ax_row in axes:
@@ -279,13 +289,21 @@ def generate_pipeline_figure(coord: dict, dtm_path: str, output_dir: Path) -> No
     step_dir.mkdir(parents=True, exist_ok=True)
     fig.canvas.draw()
     renderer = fig.canvas.get_renderer()
-    for i, ax in enumerate(axes.flat):
-        bbox_disp = ax.get_tightbbox(renderer)
-        if bbox_disp is not None:
-            bbox_in = bbox_disp.expanded(1.02, 1.04).transformed(
+    for ax, slug in zip(axes.flat, _STEP_SLUGS):
+        if slug is None:
+            continue
+        bboxes = [ax.get_tightbbox(renderer)]
+        cb = _ax_colorbars.get(ax)
+        if cb is not None:
+            cb_bbox = cb.ax.get_tightbbox(renderer)
+            if cb_bbox is not None:
+                bboxes.append(cb_bbox)
+        bboxes = [b for b in bboxes if b is not None]
+        if bboxes:
+            bbox_in = Bbox.union(bboxes).expanded(1.02, 1.04).transformed(
                 fig.dpi_scale_trans.inverted()
             )
-            fig.savefig(step_dir / f"{_STEP_SLUGS[i]}.png", dpi=cfg.DPI, bbox_inches=bbox_in)
+            fig.savefig(step_dir / f"{slug}.png", dpi=cfg.DPI, bbox_inches=bbox_in)
     print(f"    saved pipeline steps → {step_dir}/")
 
     save_figure(fig, output_dir / name, "pipeline_steps.png", dpi=cfg.DPI)
