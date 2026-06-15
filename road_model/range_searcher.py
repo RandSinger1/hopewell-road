@@ -258,7 +258,7 @@ def run_tiles(tiles, filepath, size_x, size_y, output_dir, max_workers):
             print(f"Progress: {i}/{total} ({100*i//total}%)")
 
 
-def main(mode, max_workers, size_x, size_y, overlap, half_width_meters, preview=False):
+def main(mode, max_workers, size_x, size_y, overlap, half_width_meters, preview=False, reverse=False):
     filepath = parameters.SCAN_DTM_PATH
 
     tile_fn = MODES[mode]
@@ -268,6 +268,9 @@ def main(mode, max_workers, size_x, size_y, overlap, half_width_meters, preview=
         tiles = tile_fn(size_x, size_y, overlap)
     else:
         tiles = tile_fn(size_x, size_y, overlap, half_width_meters)
+
+    if reverse:
+        tiles = tiles[::-1]
 
     if preview:
         preview_tiles(tiles, mode, size_x, size_y)
@@ -304,6 +307,9 @@ if __name__ == '__main__':
     parser.add_argument(
         '--preview', action='store_true',
         help='Show a map of tiles and cities before running the search')
+    parser.add_argument(
+        '--reverse', action='store_true',
+        help='Process tiles in reverse order (south-to-north, east-to-west)')
 
     args = parser.parse_args()
     main(
@@ -314,4 +320,5 @@ if __name__ == '__main__':
         overlap=args.overlap,
         half_width_meters=args.half_width_meters,
         preview=args.preview,
+        reverse=args.reverse,
     )
