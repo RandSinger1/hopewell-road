@@ -281,12 +281,41 @@ SCAN_MAX_WORKERS: int = 10
 
 SCAN_POLYGON: list = [
     # (lat, lon) vertices that bound the search area.
-    (39.6, -82.9),   # Circleville
+    (39.5,  -82.9),   # Circleville
     (40.0,  -82.4),    # Newark
     (39.3,  -82.9),    # Chillicothe
 ]
 """Polygon vertices (lat, lon) bounding the Hopewell Road study corridor.
 Tiles whose centres fall outside this polygon are skipped."""
+
+# ── Named anchor coordinates ──────────────────────────────────────────────────
+
+CIRCLEVILLE_COORD: tuple = (39.5,  -82.9)
+"""(lat, lon) of Circleville, Ohio — southern anchor of the corridor."""
+
+NEWARK_COORD: tuple = (40.0, -82.4)
+"""(lat, lon) of Newark, Ohio — northern anchor of the corridor."""
+
+CHILLICOTHE_COORD: tuple = (39.3, -82.9)
+"""(lat, lon) of Chillicothe, Ohio — south-west anchor of the corridor."""
+
+# ── Corridor polynomial (circleville mode) ────────────────────────────────────
+
+CORRIDOR_HALF_WIDTH_M: float = 5000.0
+"""Corridor half-width (metres) on each side of the centreline.
+Used for tile generation in range_searcher and for the map overlay polygon."""
+
+PARABOLA_A: float = 1.391264
+"""Coefficient a in the corridor parabola  y = a*(x-x0)^2 + b*(x-x0) + c."""
+
+PARABOLA_B: float = 0.199026
+"""Coefficient b in the corridor parabola."""
+
+PARABOLA_C: float = 39.5
+"""Coefficient c (latitude at x = x0) in the corridor parabola."""
+
+PARABOLA_X_OFFSET: float = -82.9
+"""Longitude offset x0 for the parabola  (= CIRCLEVILLE_COORD[1])."""
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -395,6 +424,11 @@ REPORT_COORDS: list = [
         "lat":   39.8, "lon": -82.5, "size_m": 200,
         "note": "Proposed route"
     }
+    # {
+    #     "name": "Examine Later 3",
+    #     "lat": 39.7, "lon": -82.7, "size_m": 200,
+    #     "note": "Curvy road looking thing?
+    # }
     # {
     #     "name": "Examine Later",
     #     "lat": 39.6, "lon": -82.7, "size_m": 200,

@@ -67,9 +67,36 @@
       </label>
 
       <label class="toggle-row">
+        <input type="checkbox" id="chk-corridor" checked onchange="toggleCorridor(this.checked)" />
+        <span>Corridor overlay</span>
+      </label>
+
+      <label class="toggle-row">
         <input type="checkbox" id="chk-hide-roads" onchange="_scheduleLineLoad()" />
         <span>Hide roads</span>
       </label>
+    </div>
+
+    <div class="section" id="section-filters">
+      <div class="section-label">Line Filters</div>
+
+      <div class="filter-row">
+        <span class="dim">Angle tolerance</span>
+        <span class="filter-val" id="val-angle-tol">90°</span>
+      </div>
+      <div class="row opacity-row">
+        <input type="range" id="filter-angle-tol" min="0" max="90" step="1" value="90"
+               oninput="onFilterChange()" />
+      </div>
+
+      <div class="filter-row">
+        <span class="dim">Max corridor dist</span>
+        <span class="filter-val" id="val-dist">5000 m</span>
+      </div>
+      <div class="row opacity-row">
+        <input type="range" id="filter-dist" min="0" max="5000" step="100" value="5000"
+               oninput="onFilterChange()" />
+      </div>
     </div>
 
     <div class="section" id="section-info">
@@ -116,8 +143,8 @@
         <span>Proposed route waypoints</span>
       </div>
       <div class="legend-row">
-        <span class="legend-line newark-circleville"></span>
-        <span>Newark → Circleville (arch)</span>
+        <span class="legend-line corridor"></span>
+        <span>Corridor boundary</span>
       </div>
     </div>
 

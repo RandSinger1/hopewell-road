@@ -1,3 +1,4 @@
+import math
 import numpy as np
 
 FEET = 0
@@ -86,6 +87,84 @@ def convert_meters_degrees_pixels(src, out, x, y, window=None, extent=None):
             meters_y = latitude * 364000.0
             return meters_x, meters_y
     raise ValueError(f"Unsupported conversion from {src} to {out}")
+
+
+def make_parabola(a, b, c, x_offset):
+    """Build (curve_func, curve_deriv) for  y = a*(x-x0)^2 + b*(x-x0) + c."""
+    def curve_func(x):
+        dx = x - x_offset
+        return a * dx**2 + b * dx + c
+    def curve_deriv(x):
+        dx = x - x_offset
+        return 2 * a * dx + b
+    return curve_func, curve_deriv
+
+
+def make_line(x0, y0, x1, y1):
+    """Build (curve_func, curve_deriv) for the straight line through (x0,y0)→(x1,y1)."""
+    slope = (y1 - y0) / (x1 - x0)
+    def curve_func(x):
+        return slope * (x - x0) + y0
+    def curve_deriv(_x):
+        return slope
+    return curve_func, curve_deriv
+
+
+def corridor_angle_at(curve_deriv_fn, lon):
+    """Expected wall angle at longitude (degrees, image-space y-down, CCW from +x)."""
+    return (90.0 - math.degrees(math.atan(curve_deriv_fn(lon)))) % 180
+
+
+def sample_corridor(curve_func, x_start, x_end, half_width_deg, n=200):
+    """
+    Return a closed GeoJSON LinearRing [[lon, lat], ...] for a corridor polygon.
+    Left (north) edge runs x_start→x_end; right (south) edge runs x_end→x_start.
+    """
+    xs = np.linspace(x_start, x_end, n)
+    ys = np.array([curve_func(x) for x in xs])
+    left  = [[float(x), float(y + half_width_deg)] for x, y in zip(xs, ys)]
+    right = [[float(x), float(y - half_width_deg)] for x, y in zip(xs[::-1], ys[::-1])]
+    return left + right + [left[0]]
+
+
+def parabola_from_angle_at_newark(angle_deg):
+    """
+    Derive corridor parabola coefficients from the wall angle at Newark.
+
+    Constraints solved:
+      1. Curve passes through Circleville  →  c = lat_circleville
+      2. Curve passes through Newark       →  a*dx²  + b*dx = lat_n - lat_c
+      3. Image-space angle at Newark = angle_deg  →  2a*dx + b = tan(90° - angle°)
+
+    The angle convention is the same as corridor_angle_at():
+      angle = (90 - degrees(atan(dlat/dlon))) % 180
+
+    Returns (a, b, c, x_offset) ready for make_parabola().
+    """
+    import parameters as _p
+    lat_c, lon_c = _p.CIRCLEVILLE_COORD
+    lat_n, lon_n = _p.NEWARK_COORD
+    x_offset = lon_c
+    c = lat_c
+    dx = lon_n - lon_c                          # positive: Newark is east of Circleville
+
+    deriv_n = math.tan(math.radians(90.0 - angle_deg))   # dlat/dlon at Newark
+
+    a = (deriv_n * dx - (lat_n - lat_c)) / dx ** 2
+    b = deriv_n - 2.0 * a * dx
+    return a, b, c, x_offset
+
+
+def annotate_lines_corridor(lines, curve_func, curve_deriv_fn, lat_m=111_320.0):
+    """
+    Annotate line dicts in-place with 'expected_angle' (°) and 'corridor_dist_m' (m).
+    Expected angle uses the same derivative formula as range_searcher.tile_curve.
+    """
+    for ln in lines:
+        mid_lon = (ln["xs"] + ln["xe"]) / 2
+        mid_lat = (ln["ys"] + ln["ye"]) / 2
+        ln["expected_angle"] = corridor_angle_at(curve_deriv_fn, mid_lon)
+        ln["corridor_dist_m"] = abs(mid_lat - curve_func(mid_lon)) * lat_m
 
 
 def make_gdal_progress_callback(label: str = "Progress"):

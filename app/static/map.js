@@ -5,7 +5,7 @@
 // ---------------------------------------------------------------------------
 let NEWARK      = [40.0,-82.4];
 let CHILLICOTHE = [39.3, -82.9];
-let CIRCLEVILLE = [39.6, -82.9];
+let CIRCLEVILLE = [39.5,  -82.9];
 
 let ROUTE_WAYPOINTS = [];   // loaded from /static/coords.json
 
@@ -16,10 +16,12 @@ let map;
 let dtmOverlay    = null;
 let linesLayer    = null;
 let refLayer      = null;
+let corridorLayer = null;
 let loadDebounce  = null;
 let statsDebounce = null;
 let dtmLo         = null;
 let dtmHi         = null;
+let _rawGeojson   = null;   // cached full server response, filtered client-side
 
 // ---------------------------------------------------------------------------
 // Initialise
@@ -31,6 +33,7 @@ document.addEventListener("DOMContentLoaded", () => {
   _populateFolderDropdown();
   _populateSiteInputs();
   _loadRouteWaypoints();
+  _fetchCorridor();
 });
 
 function _initMap() {
@@ -274,27 +277,11 @@ function _loadLines() {
   fetch(`/api/lines?zoom=${zoom}&bbox=${bbox}&hide_roads=${hideRoads}`)
     .then(r => r.json())
     .then(geojson => {
-      linesLayer.clearLayers();
-
-      if (!geojson.features || geojson.features.length === 0) {
-        document.getElementById("info-lines").textContent = "0";
-        return;
+      _rawGeojson = geojson;
+      _applyFilters();
+      if (geojson.features && geojson.features.length > 0) {
+        _prewarmLineTiles(geojson, zoom);
       }
-
-      const weight = _lineWeight(zoom);
-      const layer = L.geoJSON(geojson, {
-        style: () => ({
-          color:   "#ff5533",
-          weight,
-          opacity: 0.85,
-          lineCap: "butt",
-        }),
-      });
-
-      linesLayer.addLayer(layer);
-      document.getElementById("info-lines").textContent =
-        geojson.features.length.toLocaleString();
-      _prewarmLineTiles(geojson, zoom);
     })
     .catch(console.error);
 }
@@ -349,6 +336,83 @@ function _prewarmLineTiles(geojson, zoom) {
   for (const [key] of sorted) {
     fetch(`/api/dtm_tile/${key}.png?lo=${dtmLo}&hi=${dtmHi}`).catch(() => {});
   }
+}
+
+// ---------------------------------------------------------------------------
+// Corridor overlay
+// ---------------------------------------------------------------------------
+function _fetchCorridor() {
+  fetch("/api/corridor")
+    .then(r => r.json())
+    .then(feature => {
+      if (!feature) return;
+      corridorLayer = L.geoJSON(feature, {
+        style: {
+          color:       "#ccaa22",
+          weight:      1.5,
+          opacity:     0.55,
+          dashArray:   "6 4",
+          fillColor:   "#ccaa22",
+          fillOpacity: 0.07,
+        },
+        interactive: false,
+      });
+      if (document.getElementById("chk-corridor").checked) {
+        corridorLayer.addTo(map);
+        // Put corridor beneath detected-lines layer
+        corridorLayer.bringToBack();
+      }
+    })
+    .catch(console.error);
+}
+
+function toggleCorridor(show) {
+  if (!corridorLayer) return;
+  if (show) { corridorLayer.addTo(map); corridorLayer.bringToBack(); }
+  else map.removeLayer(corridorLayer);
+}
+
+// ---------------------------------------------------------------------------
+// Client-side line filters (angle tolerance + corridor distance)
+// ---------------------------------------------------------------------------
+function _angleDiff(a, b) {
+  const d = Math.abs(a - b) % 180;
+  return d > 90 ? 180 - d : d;
+}
+
+function onFilterChange() {
+  const tol  = parseInt(document.getElementById("filter-angle-tol").value);
+  const dist = parseInt(document.getElementById("filter-dist").value);
+  document.getElementById("val-angle-tol").textContent = tol + "°";
+  document.getElementById("val-dist").textContent = dist.toLocaleString() + " m";
+  _applyFilters();
+}
+
+function _applyFilters() {
+  linesLayer.clearLayers();
+  if (!_rawGeojson || !_rawGeojson.features) {
+    document.getElementById("info-lines").textContent = "0";
+    return;
+  }
+
+  const tol  = parseInt(document.getElementById("filter-angle-tol").value);
+  const dist = parseInt(document.getElementById("filter-dist").value);
+
+  const features = _rawGeojson.features.filter(f => {
+    const p = f.properties;
+    if (p.expected_angle != null && _angleDiff(p.angle, p.expected_angle) > tol) return false;
+    if (p.corridor_dist_m != null && p.corridor_dist_m > dist) return false;
+    return true;
+  });
+
+  if (features.length > 0) {
+    const zoom   = map.getZoom();
+    const weight = _lineWeight(zoom);
+    L.geoJSON({ type: "FeatureCollection", features }, {
+      style: () => ({ color: "#ff5533", weight, opacity: 0.85, lineCap: "butt" }),
+    }).addTo(linesLayer);
+  }
+  document.getElementById("info-lines").textContent = features.length.toLocaleString();
 }
 
 function _lineWeight(zoom) {
@@ -434,10 +498,6 @@ function _drawReferenceLines() {
     L.polyline([NEWARK, CHILLICOTHE], { ...dashOpts, color: "#44aaff" }).addTo(refLayer);
   }
 
-  // Arch: Newark → Circleville (quadratic Bézier curving northward)
-  L.polyline(_bezierArch(NEWARK, CIRCLEVILLE, 0.35), {
-    ...dashOpts, color: "#ffcc00",
-  }).addTo(refLayer);
 }
 
 /**

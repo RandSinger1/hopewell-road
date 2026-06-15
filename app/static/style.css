@@ -205,6 +205,20 @@ select option { background: var(--input-bg); }
 .legend-line.detected         { border-top-color: #ff5533; border-top-style: solid; }
 .legend-line.newark-chilli    { border-top-color: #44aaff; }
 .legend-line.newark-circleville { border-top-color: #ffcc00; }
+.legend-line.corridor         { border-top-color: #ccaa22; }
+
+/* ── Line filter sliders ───────────────────────────────────────── */
+.filter-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 2px;
+}
+.filter-val {
+  color: var(--accent);
+  font-size: 11px;
+  flex-shrink: 0;
+}
 
 /* ── Copy button ───────────────────────────────────────────────── */
 .copy-btn {

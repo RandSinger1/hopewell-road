@@ -16,6 +16,8 @@ from pathlib import Path
 from flask import Flask, jsonify, render_template, request, send_file
 
 import parameters
+from utils import (make_parabola, make_line, sample_corridor,
+                   annotate_lines_corridor)
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
@@ -34,6 +36,8 @@ state = {
     "osm_road_count": 0,
     # Recent non-fatal errors surfaced to the UI
     "load_errors": [],           # list of str, capped at 20
+    # Corridor mode (None | "circleville" | "chillicothe")
+    "corridor_mode": None,
 }
 
 
@@ -54,6 +58,7 @@ def get_config():
         "lines_loaded": len(state["lines"]),
         "dtm_loaded": state["dtm_bounds"] is not None,
         "dtm_bounds": state["dtm_bounds"],
+        "corridor_mode": state["corridor_mode"],
     })
 
 
@@ -112,6 +117,20 @@ def get_lines():
 
     filtered = _filter_lines(state["lines"], bbox, zoom, hide_roads)
     return jsonify(_to_geojson(filtered))
+
+
+@app.route("/api/corridor")
+def get_corridor():
+    fns = _get_corridor_fns()
+    if fns is None:
+        return jsonify(None)
+    curve_func, _deriv, x_start, x_end, half_width_deg = fns
+    ring = sample_corridor(curve_func, x_start, x_end, half_width_deg)
+    return jsonify({
+        "type": "Feature",
+        "geometry": {"type": "Polygon", "coordinates": [ring]},
+        "properties": {"mode": state["corridor_mode"]},
+    })
 
 
 @app.route("/api/prewarm_priority", methods=["POST"])
@@ -225,6 +244,29 @@ def available_folders():
                 "count": count,
             })
     return jsonify(folders)
+
+
+# ---------------------------------------------------------------------------
+# Corridor geometry helpers
+# ---------------------------------------------------------------------------
+
+def _get_corridor_fns():
+    """Return (curve_func, curve_deriv, x_start, x_end, half_width_deg) or None."""
+    mode = state.get("corridor_mode")
+    half_width_deg = parameters.CORRIDOR_HALF_WIDTH_M / parameters.METERS_PER_DEGREE_LAT
+    if mode == "circleville":
+        curve_func, curve_deriv = make_parabola(
+            parameters.PARABOLA_A, parameters.PARABOLA_B, parameters.PARABOLA_C,
+            x_offset=parameters.PARABOLA_X_OFFSET,
+        )
+        return curve_func, curve_deriv, parameters.PARABOLA_X_OFFSET, \
+               parameters.NEWARK_COORD[1], half_width_deg
+    if mode == "chillicothe":
+        x0, y0 = parameters.CHILLICOTHE_COORD[1], parameters.CHILLICOTHE_COORD[0]
+        x1, y1 = parameters.CIRCLEVILLE_COORD[1], parameters.CIRCLEVILLE_COORD[0]
+        curve_func, curve_deriv = make_line(x0, y0, x1, y1)
+        return curve_func, curve_deriv, x0, x1, half_width_deg
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -402,6 +444,12 @@ def _load_lines(folder: str) -> list:
 
     log.info("loaded %d lines from %s — OSM road detection starting in background", len(lines), folder)
 
+    # Annotate with corridor geometry (expected angle + distance from centreline)
+    fns = _get_corridor_fns()
+    if fns is not None and lines:
+        curve_func, curve_deriv = fns[0], fns[1]
+        annotate_lines_corridor(lines, curve_func, curve_deriv)
+
     # Run OSM road detection asynchronously so line loading returns immediately.
     # _mark_osm_road_lines mutates the dicts in-place; CPython's GIL makes the
     # per-key dict assignment effectively atomic, so there is no data race.
@@ -496,6 +544,8 @@ def _to_geojson(lines: list) -> dict:
                 "length": ln["length"],
                 "angle": ln["angle"],
                 "road": ln.get("road", False),
+                "expected_angle": ln.get("expected_angle"),
+                "corridor_dist_m": ln.get("corridor_dist_m"),
             },
         })
     return {"type": "FeatureCollection", "features": features}
@@ -531,7 +581,7 @@ def main():
     parser = argparse.ArgumentParser(description="KhthonLiDAR Map Viewer")
     parser.add_argument("--folder", default="", help="Locations subfolder (e.g. data/locations)")
     parser.add_argument("--search-size", type=int, default=parameters.SCAN_TILE_SIZE_M, help="Search size in pixels for line overlay matching")
-    parser.add_argument("--mode", choices=["polygon", "circleville", "chilicothe"],
+    parser.add_argument("--mode", choices=["polygon", "circleville", "chillicothe"],
                         help="Auto-select the locations folder that matches this scan mode")
     parser.add_argument("--dtm", default="", help="Path to merged DTM GeoTIFF")
     parser.add_argument("--port", type=int, default=parameters.SERVER_PORT)
@@ -552,6 +602,7 @@ def main():
             log.info("mode=%s → auto-selected folder: %s", args.mode, folder)
         else:
             log.warning("No locations folder found matching mode '%s' in %s", args.mode, loc_root)
+    state["corridor_mode"] = args.mode   # None | "circleville" | "chillicothe"
     state["locations_folder"] = folder
     state["lines"] = _load_lines(folder)
 
