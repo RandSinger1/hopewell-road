@@ -1,0 +1,6 @@
+[submodule "AOI2List"]
+	path = AOI2List
+	url = https://github.com/RandSinger1/AOI2List.git
+[submodule "laszip-python"]
+	path = laszip-python
+	url = https://github.com/tmontaigu/laszip-python.git
