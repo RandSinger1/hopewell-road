@@ -57,6 +57,30 @@ khthonlidar/
 
 ## Installation
 
+### Automated setup (recommended)
+
+**Windows:**
+
+```powershell
+.\setup_env.ps1
+```
+
+**Linux / macOS:**
+
+```bash
+chmod +x setup_env.sh && ./setup_env.sh
+```
+
+Both scripts run all steps below in order.  Pass optional arguments to override
+the environment name or Python version:
+
+- PowerShell: `.\setup_env.ps1 -EnvName myenv -PythonVersion 3.11`
+- Bash: `./setup_env.sh myenv 3.11`
+
+---
+
+### Manual setup
+
 ### 1. Clone with submodules
 
 AOI2List and laszip-python are tracked as git submodules.  Always clone with:
