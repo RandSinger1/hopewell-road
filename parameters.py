@@ -296,8 +296,10 @@ CIRCLEVILLE_COORD: tuple = (39.5,  -82.9)
 NEWARK_COORD: tuple = (40.0, -82.4)
 """(lat, lon) of Newark, Ohio — northern anchor of the corridor."""
 
-CHILLICOTHE_COORD: tuple = (39.3, -82.9)
+CHILLICOTHE_COORD: tuple = (39.3,-82.9)
 """(lat, lon) of Chillicothe, Ohio — south-west anchor of the corridor."""
+
+HIGH_BANKS_COORD: tuple = (39.2, -82.9)
 
 # ── Corridor polynomial (circleville mode) ────────────────────────────────────
 

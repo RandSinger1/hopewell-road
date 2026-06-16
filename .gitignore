@@ -9,7 +9,6 @@ data/*
 *.ps1
 *.png
 app/.dtm_cache
-app/static/coords.json
 .claude
 *.docx
 *.pdf

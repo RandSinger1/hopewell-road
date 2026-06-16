@@ -585,6 +585,7 @@ def main():
                         help="Auto-select the locations folder that matches this scan mode")
     parser.add_argument("--dtm", default="", help="Path to merged DTM GeoTIFF")
     parser.add_argument("--port", type=int, default=parameters.SERVER_PORT)
+    parser.add_argument("--max-workers", type=int, default=parameters.SERVER_THREADS, help="Max workers for OSM prewarm and DTM overview generation")
     args = parser.parse_args()
 
     size = args.search_size
@@ -614,7 +615,7 @@ def main():
     log.info("Starting on http://127.0.0.1:%d", args.port)
     try:
         from waitress import serve
-        serve(app, host="127.0.0.1", port=args.port, threads=parameters.SERVER_THREADS)
+        serve(app, host="127.0.0.1", port=args.port, threads=args.max_workers)
     except ImportError:
         log.warning("waitress not installed, falling back to Flask dev server")
         app.run(debug=False, port=args.port, threaded=True)
