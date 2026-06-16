@@ -3,9 +3,11 @@ from AOI2List.src.aoi2list import query_polygon
 import json
 import argparse
 
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
 
 def get_polygons(AREA, n_splits=10):
-    with open("data/polygons.json", "r") as f:
+    with open(_PROJECT_ROOT / "data" / "polygons.json", "r") as f:
         polygons = json.load(f)
     polygon_segment = polygons[AREA]
     for i in range(n_splits):
@@ -43,7 +45,7 @@ def array_to_wkt_string(coordinates: list) -> str:
 
 def main(AREA="Hart_Island", n_splits=10) -> list[str]:
     """Fetch tile metadata and save JSON file lists. Returns the sub-area names written."""
-    output_dir = Path("data/saved_file_lists")
+    output_dir = _PROJECT_ROOT / "data" / "saved_file_lists"
     output_dir.mkdir(exist_ok=True)
     polygons = get_polygons(AREA, n_splits=n_splits)
     created: list[str] = []

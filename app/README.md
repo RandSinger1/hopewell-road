@@ -8,15 +8,15 @@ Hopewell ceremonial sites in Ohio.
 
 ```bash
 # From the project root (khthonlidar/)
-pip install flask Pillow   # GDAL is expected from the conda environment
+pip install -r app/requirements.txt   # GDAL is expected from the conda environment
 
 python app/server.py \
-    --folder locations/600_600 \
-    --dtm    loaded_tiles/Whole_Road/merged_dtm.tif \
+    --folder data/locations/600_600 \
+    --dtm    data/loaded_tiles/Whole_Road/merged_dtm.tif \
     --port   5000
 ```
 
-Then open **http://127.0.0.1:5000** in a browser.
+Then open **<http://127.0.0.1:5000>** in a browser.
 
 Both `--folder` and `--dtm` are optional — you can load them from the sidebar UI
 after the server starts.
@@ -24,14 +24,14 @@ after the server starts.
 ## Command-line options
 
 | Flag | Default | Description |
-|------|---------|-------------|
-| `--folder` | *(none)* | Relative or absolute path to a locations subfolder, e.g. `locations/600_600` |
-| `--dtm` | *(none)* | Path to a merged DTM GeoTIFF, e.g. `loaded_tiles/Whole_Road/merged_dtm.tif` |
+| ---- | ------- | ----------- |
+| `--folder` | *(none)* | Relative or absolute path to a locations subfolder, e.g. `data/locations/600_600` |
+| `--dtm` | *(none)* | Path to a merged DTM GeoTIFF, e.g. `data/loaded_tiles/Whole_Road/merged_dtm.tif` |
 | `--port` | `5000` | Local port to serve on |
 
 ## Folder layout
 
-```
+```text
 app/
   server.py          Flask backend (API routes + line/DTM data loading)
   dtm_renderer.py    Converts a GeoTIFF to a hillshaded RGBA PNG via GDAL
@@ -53,7 +53,7 @@ app/
   "line_0_xs": -82.4, "line_0_ys": 40.0,
   "line_0_xe": -82.4, "line_0_ye": 40.0,
   "line_0_length": 0.00110, "line_0_angle": 0.96,
-  "line_1_xs": ..., ...
+  "line_1_xs": "...", "...": "..."
 }]
 ```
 
@@ -66,7 +66,7 @@ by `pdal_pipeline.py` / `merge_multiple_areas.py`.  It is rendered once at start
 ## Map controls
 
 | Action | Effect |
-|--------|--------|
+| ------ | ------ |
 | Scroll / `+` / `-` | Zoom in/out |
 | Click-drag | Pan |
 | **`L` key** | Toggle detected lines on/off |
@@ -79,7 +79,7 @@ by `pdal_pipeline.py` / `merge_multiple_areas.py`.  It is rendered once at start
 Line density is reduced at small scales so the map stays readable:
 
 | Zoom | Minimum line length shown |
-|------|--------------------------|
+| ---- | ------------------------- |
 | < 11 | > 0.005 ° (~550 m) |
 | 11 | > 0.002 ° (~220 m) |
 | 12 | > 0.001 ° (~110 m) |
