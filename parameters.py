@@ -179,6 +179,7 @@ HESSIAN_SIGMA: float = 2.0
 """Gaussian smoothing σ (pixels) applied before computing the Hessian matrix
 for ridge-orientation estimation.  Larger values → less sensitive to noise
 but blur thin ridges."""
+# TODO: Should I raise this?
 
 ANGLE_TOLERANCE: float = 15.0
 """Pixels whose Hessian orientation deviates more than ±ANGLE_TOLERANCE
@@ -224,6 +225,7 @@ A detected pair whose spacing deviates more than this from SPACING_METERS
 is rejected."""
 
 OVERLAP_RATIO: float = 0.3
+# TODO Maybe i could try making this 0.
 """Minimum fractional overlap required along the shared axis of two lines
 before they qualify as a parallel pair.  Prevents pairing short fragments
 against long lines with little spatial coincidence."""
@@ -410,7 +412,7 @@ REPORT_COORDS: list = [
         "note": "Ground truth — confirmed earthwork, 41 m width",
         "true_positive_pair_index": [0, 8]
     },
-{
+    {
         "name": "Beaver Run",
         "lat":   39.9, "lon": -82.5, "size_m": 200,
         "note": "Proposed route, 37 m width",
@@ -437,6 +439,11 @@ REPORT_COORDS: list = [
         "lat":   39.8, "lon": -82.5, "size_m": 200,
         "note": "Proposed route",
         "true_positive_pair_index": 0
+    },
+    {
+        "name": "Mount Zion Farm",
+        "lat": 39.7, "lon": -82.7, "size_m": 200,
+        "note": "eyeballed this one"
     }
     # {
     #     "name": "Examine Later 3",
@@ -469,6 +476,26 @@ REPORT_COORDS: list = [
     #     "lat":   39.9, "lon": -82.8, "size_m": 200,
     #     "note": "Very confident, possibly new discovery",
     # },
+    # {
+    #     "name": "single line near circleville",
+    #     "lat": 39.6, "lon": -82.8, "size_m": 200,
+    #     "note": "single line near circleville"
+    # }
+    # {
+    #     "name": "Shapes in woodlot?",
+    #     "lat": 39.6, "lon": -82.7, "size_m": 200,
+    #     "note": "Shapes in woodlot? "
+    # }
+    # {
+    #     "name": "Farm border, trees? Probably a coincidence",
+    #     "lat": 39.6, "lon": -82.7, "size_m": 200,
+    #     "note": "Farm border, trees? Probably a coincidence",
+    # },
+    # {
+    #     "name": "Weird shape",
+    #     "lat": 39.7, "lon": -82.7, "size_m": 200,
+    #     "note": "Weird shape",
+    # }
     
 ]
 """Coordinates to include in the report.  Add entries here to process

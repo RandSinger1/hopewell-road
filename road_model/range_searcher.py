@@ -15,9 +15,11 @@ from utils import (convert_meters_degrees_pixels, METERS, DEGREES,
 import json
 
 # ── Named coordinates ─────────────────────────────────────────────────────────
-CIRCLEVILLE = (39.5,  -82.9)   # (lat, lon)
-NEWARK      = (40.0,  -82.4)
-CHILLICOTHE  = (39.3,-82.9)
+# Single source of truth: parameters.py
+CIRCLEVILLE = parameters.CIRCLEVILLE_COORD   # (lat, lon)
+NEWARK      = parameters.NEWARK_COORD
+CHILLICOTHE = parameters.CHILLICOTHE_COORD
+HIGH_BANKS  = parameters.HIGH_BANKS_COORD
 
 
 # ── Tile generators ───────────────────────────────────────────────────────────
@@ -155,10 +157,25 @@ def _tiles_chillicothe(size_x, size_y, overlap, half_width_meters=5000):
     )
 
 
+def _tiles_high_banks(size_x, size_y, overlap, half_width_meters=5000):
+    """Straight-line corridor from Newark to High Banks."""
+    half_width_deg = convert_meters_degrees_pixels(METERS, DEGREES, 0, half_width_meters)[1]
+    x0, y0 = HIGH_BANKS[1], HIGH_BANKS[0]
+    x1, y1 = NEWARK[1], NEWARK[0]
+    curve_func, curve_deriv = make_line(x0, y0, x1, y1)
+    return tile_curve(
+        curve_func, curve_deriv,
+        x_start=x0, x_end=x1,
+        half_width_deg=half_width_deg,
+        size_x=size_x, size_y=size_y, overlap=overlap,
+    )
+
+
 MODES = {
     'polygon':      _tiles_polygon,
     'circleville':  _tiles_circleville,
     'chillicothe':   _tiles_chillicothe,
+    'high_banks':   _tiles_high_banks,
 }
 
 
@@ -168,6 +185,7 @@ _CITIES = {
     'Circleville': CIRCLEVILLE,
     'Newark':      NEWARK,
     'Chillicothe': CHILLICOTHE,
+    'High Banks':  HIGH_BANKS,
 }
 
 def preview_tiles(tiles, mode, size_x, size_y):
@@ -210,6 +228,14 @@ def preview_tiles(tiles, mode, size_x, size_y):
         [NEWARK[0], CHILLICOTHE[0]],
         color='darkorange', linewidth=1.5, linestyle='--', zorder=5,
         label='Newark–Chillicothe',
+    )
+
+    # Straight line Newark → High Banks
+    ax.plot(
+        [NEWARK[1], HIGH_BANKS[1]],
+        [NEWARK[0], HIGH_BANKS[0]],
+        color='mediumorchid', linewidth=1.5, linestyle='--', zorder=5,
+        label='Newark–High Banks',
     )
 
     # Named cities
@@ -286,7 +312,7 @@ if __name__ == '__main__':
         '--mode', '-m',
         choices=list(MODES),
         default='polygon',
-        help='Search region: polygon (default), circleville, or chillicothe')
+        help='Search region: polygon (default), circleville, chillicothe, or high_banks')
     parser.add_argument(
         '--max_workers', '-w',
         type=int, default=parameters.SCAN_MAX_WORKERS,

@@ -2,10 +2,12 @@
 
 // ---------------------------------------------------------------------------
 // Reference site coordinates (Hopewell earthwork locations, Ohio)
+// Single source of truth: parameters.py, fetched via /api/config.
 // ---------------------------------------------------------------------------
-let NEWARK      = [40.0,-82.4];
-let CHILLICOTHE = [39.3, -82.9];
-let CIRCLEVILLE = [39.5,  -82.9];
+let NEWARK      = null;
+let CHILLICOTHE = null;
+let CIRCLEVILLE = null;
+let HIGH_BANKS  = null;
 
 let ROUTE_WAYPOINTS = [];   // loaded from /static/coords.json
 
@@ -31,7 +33,6 @@ document.addEventListener("DOMContentLoaded", () => {
   _initSidebar();
   _fetchInitialConfig();
   _populateFolderDropdown();
-  _populateSiteInputs();
   _loadRouteWaypoints();
   _fetchCorridor();
 });
@@ -54,7 +55,6 @@ function _initMap() {
   linesLayer = L.layerGroup().addTo(map);
   refLayer   = L.layerGroup().addTo(map);
 
-  _drawReferenceLines();
   _addMapControls();
   _addKeyboardShortcuts();
 
@@ -80,6 +80,12 @@ function _fetchInitialConfig() {
   fetch("/api/config")
     .then(r => r.json())
     .then(cfg => {
+      NEWARK      = cfg.newark_coord;
+      CHILLICOTHE = cfg.chillicothe_coord;
+      CIRCLEVILLE = cfg.circleville_coord;
+      HIGH_BANKS  = cfg.high_banks_coord;
+      _populateSiteInputs();
+      _drawReferenceLines();
       if (cfg.locations_folder) {
         document.getElementById("folder-input").value = cfg.locations_folder;
         _setStatus("lines", `${cfg.lines_loaded} lines loaded`);
@@ -263,9 +269,11 @@ function _fetchDtmStats() {
 function _triggerPriorityPrewarm(lo, hi) {
   // Corridors: [lon1, lat1, lon2, lat2]
   // Newark → Chillicothe (main Hopewell Road axis)
+  // Newark → High Banks (straight-line road)
   // Newark → Circleville (secondary Hopewell corridor)
   const corridors = [
     [NEWARK[1], NEWARK[0], CHILLICOTHE[1], CHILLICOTHE[0]],
+    [NEWARK[1], NEWARK[0], HIGH_BANKS[1], HIGH_BANKS[0]],
   ];
   fetch("/api/prewarm_priority", {
     method: "POST",
@@ -339,9 +347,10 @@ function _prewarmLineTiles(geojson, zoom) {
       const [s, e] = f.geometry.coordinates;
       const mx = (s[0] + e[0]) / 2;
       const my = (s[1] + e[1]) / 2;
-      const dist = _ptSegDistM(mx, my,
-                               NEWARK[1], NEWARK[0],
-                               CHILLICOTHE[1], CHILLICOTHE[0]);
+      const dist = Math.min(
+        _ptSegDistM(mx, my, NEWARK[1], NEWARK[0], CHILLICOTHE[1], CHILLICOTHE[0]),
+        _ptSegDistM(mx, my, NEWARK[1], NEWARK[0], HIGH_BANKS[1], HIGH_BANKS[0]),
+      );
       const [tx, ty] = _lngLatToTileXY(mx, my, z);
       const key = `${z}/${tx}/${ty}`;
       if (!tileDist.has(key) || dist < tileDist.get(key)) tileDist.set(key, dist);
@@ -492,19 +501,23 @@ function _populateSiteInputs() {
   document.getElementById("site-chilli-lon").value   = CHILLICOTHE[1];
   document.getElementById("site-circle-lat").value   = CIRCLEVILLE[0];
   document.getElementById("site-circle-lon").value   = CIRCLEVILLE[1];
+  document.getElementById("site-highbanks-lat").value = HIGH_BANKS[0];
+  document.getElementById("site-highbanks-lon").value = HIGH_BANKS[1];
 }
 
 function applySites() {
   const parse = id => parseFloat(document.getElementById(id).value);
-  const newark = [parse("site-newark-lat"), parse("site-newark-lon")];
-  const chilli = [parse("site-chilli-lat"), parse("site-chilli-lon")];
-  const circle = [parse("site-circle-lat"), parse("site-circle-lon")];
+  const newark    = [parse("site-newark-lat"), parse("site-newark-lon")];
+  const chilli    = [parse("site-chilli-lat"), parse("site-chilli-lon")];
+  const circle    = [parse("site-circle-lat"), parse("site-circle-lon")];
+  const highBanks = [parse("site-highbanks-lat"), parse("site-highbanks-lon")];
 
-  if ([...newark, ...chilli, ...circle].some(isNaN)) return;
+  if ([...newark, ...chilli, ...circle, ...highBanks].some(isNaN)) return;
 
   NEWARK      = newark;
   CHILLICOTHE = chilli;
   CIRCLEVILLE = circle;
+  HIGH_BANKS  = highBanks;
   _drawReferenceLines();
 }
 
@@ -525,6 +538,7 @@ function _loadRouteWaypoints() {
 // Reference lines
 // ---------------------------------------------------------------------------
 function _drawReferenceLines() {
+  if (!NEWARK || !CHILLICOTHE || !CIRCLEVILLE || !HIGH_BANKS) return;
   refLayer.clearLayers();
 
   const dashOpts = { weight: 1.5, opacity: 0.9, dashArray: "10 7" };
@@ -554,6 +568,8 @@ function _drawReferenceLines() {
     L.polyline([NEWARK, CHILLICOTHE], { ...dashOpts, color: "#44aaff" }).addTo(refLayer);
   }
 
+  // Newark → High Banks (straight-line road, treated like Newark → Chillicothe)
+  L.polyline([NEWARK, HIGH_BANKS], { ...dashOpts, color: "#cc66ff" }).addTo(refLayer);
 }
 
 /**

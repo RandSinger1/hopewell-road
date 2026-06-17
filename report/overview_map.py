@@ -4,8 +4,8 @@ overview_map.py — Study-corridor overview + per-site figures.
 Outputs
 -------
 overview_map.png
-    Full corridor map: cities, Newark–Chillicothe azimuth line, every
-    REPORT_COORDS site labelled with its detected bearing.
+    Full corridor map: cities, Newark–Chillicothe and Newark–High Banks
+    azimuth lines, every REPORT_COORDS site labelled with its detected bearing.
 
 overview_<name>.png  (one per coord)
     Same full corridor map, with the named site highlighted and all
@@ -25,9 +25,10 @@ import parameters
 
 
 _CITIES = {
-    "Newark":      (40.0, -82.4),
-    "Circleville": (39.6,    -82.9),
-    "Chillicothe": (39.3,-82.9),
+    "Newark":      parameters.NEWARK_COORD,
+    "Circleville": parameters.CIRCLEVILLE_COORD,
+    "Chillicothe": parameters.CHILLICOTHE_COORD,
+    "High Banks":  parameters.HIGH_BANKS_COORD,
 }
 
 _HALF_LINE_M = 5_000
@@ -89,6 +90,12 @@ def _newark_chillicothe_bearing() -> float:
     return np.degrees(np.arctan2(c_lon - n_lon, c_lat - n_lat)) % 360
 
 
+def _newark_high_banks_bearing() -> float:
+    n_lat, n_lon = _CITIES["Newark"]
+    h_lat, h_lon = _CITIES["High Banks"]
+    return np.degrees(np.arctan2(h_lon - n_lon, h_lat - n_lat)) % 360
+
+
 # ── shared map drawing ────────────────────────────────────────────────────────
 
 def _draw_corridor_map(ax: plt.Axes, sites: list[dict],
@@ -131,6 +138,18 @@ def _draw_corridor_map(ax: plt.Axes, sites: list[dict],
     ax.annotate(f"az {az:.1f}°", xy=(mid_lon, mid_lat),
                 xytext=(-30, 6), textcoords="offset points",
                 fontsize=7, color="#a0c8e0", alpha=0.85)
+
+    # Newark → High Banks azimuth line
+    h_lat, h_lon = _CITIES["High Banks"]
+    az_hb = _newark_high_banks_bearing()
+    ax.plot([n_lon, h_lon], [n_lat, h_lat],
+            color="#cc99ff", linewidth=1.5, linestyle="--",
+            alpha=0.7, zorder=3)
+    mid_lon_hb = (n_lon + h_lon) / 2
+    mid_lat_hb = (n_lat + h_lat) / 2
+    ax.annotate(f"az {az_hb:.1f}°", xy=(mid_lon_hb, mid_lat_hb),
+                xytext=(-30, 6), textcoords="offset points",
+                fontsize=7, color="#cc99ff", alpha=0.85)
 
     # cities
     for city, (clat, clon) in _CITIES.items():
@@ -213,6 +232,8 @@ def _save_site_figure(focus: dict, all_sites: list[dict], output_dir: Path) -> N
                       marker="D", markersize=7, label="City"),
         mlines.Line2D([], [], color="#a0c8e0", linewidth=1.5,
                       linestyle="--", label="Newark – Chillicothe"),
+        mlines.Line2D([], [], color="#cc99ff", linewidth=1.5,
+                      linestyle="--", label="Newark – High Banks"),
     ]
     ax.legend(handles=legend_handles, fontsize=8, loc="lower right",
               facecolor="#1e1e1e", edgecolor="#444444",
@@ -255,6 +276,8 @@ def generate_overview_map(coords: list[dict], dtm_path: str, output_dir: Path,
                       marker="D", markersize=7, label="City"),
         mlines.Line2D([], [], color="#a0c8e0", linewidth=1.5,
                       linestyle="--", label="Newark – Chillicothe"),
+        mlines.Line2D([], [], color="#cc99ff", linewidth=1.5,
+                      linestyle="--", label="Newark – High Banks"),
     ]
     ax.legend(handles=legend_handles, fontsize=8, loc="lower right",
               facecolor="#1e1e1e", edgecolor="#444444",

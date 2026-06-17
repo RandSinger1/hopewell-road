@@ -37,7 +37,7 @@ state = {
     "osm_road_count": 0,
     # Recent non-fatal errors surfaced to the UI
     "load_errors": [],           # list of str, capped at 20
-    # Corridor mode (None | "circleville" | "chillicothe")
+    # Corridor mode (None | "circleville" | "chillicothe" | "high_banks")
     "corridor_mode": None,
 }
 
@@ -61,6 +61,10 @@ def get_config():
         "dtm_bounds": state["dtm_bounds"],
         "corridor_mode": state["corridor_mode"],
         "angle_tolerance": parameters.ANGLE_TOLERANCE,
+        "newark_coord": parameters.NEWARK_COORD,
+        "chillicothe_coord": parameters.CHILLICOTHE_COORD,
+        "circleville_coord": parameters.CIRCLEVILLE_COORD,
+        "high_banks_coord": parameters.HIGH_BANKS_COORD,
     })
 
 
@@ -265,7 +269,12 @@ def _get_corridor_fns():
                parameters.NEWARK_COORD[1], half_width_deg
     if mode == "chillicothe":
         x0, y0 = parameters.CHILLICOTHE_COORD[1], parameters.CHILLICOTHE_COORD[0]
-        x1, y1 = parameters.CIRCLEVILLE_COORD[1], parameters.CIRCLEVILLE_COORD[0]
+        x1, y1 = parameters.NEWARK_COORD[1], parameters.NEWARK_COORD[0]
+        curve_func, curve_deriv = make_line(x0, y0, x1, y1)
+        return curve_func, curve_deriv, x0, x1, half_width_deg
+    if mode == "high_banks":
+        x0, y0 = parameters.HIGH_BANKS_COORD[1], parameters.HIGH_BANKS_COORD[0]
+        x1, y1 = parameters.NEWARK_COORD[1], parameters.NEWARK_COORD[0]
         curve_func, curve_deriv = make_line(x0, y0, x1, y1)
         return curve_func, curve_deriv, x0, x1, half_width_deg
     return None
@@ -624,7 +633,7 @@ def main():
     parser = argparse.ArgumentParser(description="KhthonLiDAR Map Viewer")
     parser.add_argument("--folder", default="", help="Locations subfolder (e.g. data/locations)")
     parser.add_argument("--search-size", type=int, default=parameters.SCAN_TILE_SIZE_M, help="Search size in pixels for line overlay matching")
-    parser.add_argument("--mode", choices=["polygon", "circleville", "chillicothe"],
+    parser.add_argument("--mode", choices=["polygon", "circleville", "chillicothe", "high_banks"],
                         help="Auto-select the locations folder that matches this scan mode")
     parser.add_argument("--dtm", default="", help="Path to merged DTM GeoTIFF")
     parser.add_argument("--port", type=int, default=parameters.SERVER_PORT)
@@ -646,7 +655,7 @@ def main():
             log.info("mode=%s → auto-selected folder: %s", args.mode, folder)
         else:
             log.warning("No locations folder found matching mode '%s' in %s", args.mode, loc_root)
-    state["corridor_mode"] = args.mode   # None | "circleville" | "chillicothe"
+    state["corridor_mode"] = args.mode   # None | "circleville" | "chillicothe" | "high_banks"
     state["locations_folder"] = folder
     state["lines"] = _load_lines(folder)
 

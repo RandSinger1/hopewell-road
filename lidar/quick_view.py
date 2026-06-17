@@ -133,12 +133,14 @@ def quick_view_dtm(input_path, sample_step=10, cmap='viridis', figsize=(12, 8), 
     ax.set_ylabel('Y coordinate (map units)')
     ax.set_title(f"DTM: {input_path} (low-res, step={sample_step})")
     if show_cities:
-        circleville = (39.6, -82.9)
-        newark      = (40.0, -82.4)
-        chillicothe  = (39.3,-82.9)
+        circleville = parameters.CIRCLEVILLE_COORD
+        newark      = parameters.NEWARK_COORD
+        chillicothe = parameters.CHILLICOTHE_COORD
+        high_banks  = parameters.HIGH_BANKS_COORD
         plt.plot(circleville[1], circleville[0], 'ro')
         plt.plot(newark[1],      newark[0],      'ro')
         plt.plot(chillicothe[1],  chillicothe[0],  'ro')
+        plt.plot(high_banks[1],  high_banks[0],   'ro')
     plt.tight_layout()
     if outpath:
         plt.savefig(outpath)
