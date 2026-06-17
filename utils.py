@@ -89,6 +89,56 @@ def convert_meters_degrees_pixels(src, out, x, y, window=None, extent=None):
     raise ValueError(f"Unsupported conversion from {src} to {out}")
 
 
+def perp_spacing_at_overlap(line1, dir1, line2, dir2):
+    """
+    Perpendicular distance between two line segments measured at the midpoint
+    of their overlapping region along the shared axis.
+
+    This avoids the error introduced when full-segment midpoints sit at
+    different along-wall positions (e.g., one line extends further than the
+    other), which would cause midpoint-to-midpoint distance to differ from
+    the true wall separation.
+
+    line1, line2 : ((x0, y0), (x1, y1)) endpoint pairs, in any consistent
+                   isotropic unit (pixels, metres, ...).
+    dir1, dir2   : unit direction vectors for line1 / line2.
+    """
+    A = np.array(line1[0], dtype=float)
+    B = np.array(line1[1], dtype=float)
+    C = np.array(line2[0], dtype=float)
+    D = np.array(line2[1], dtype=float)
+
+    d2 = dir2 if np.dot(dir1, dir2) >= 0 else -dir2
+
+    avg = dir1 + d2
+    avg_len = np.linalg.norm(avg)
+    avg_dir = avg / avg_len if avg_len > 1e-9 else dir1
+    perp = np.array([-avg_dir[1], avg_dir[0]])
+
+    tA = np.dot(A, avg_dir)
+    tB = np.dot(B, avg_dir)
+    tC = np.dot(C, avg_dir)
+    tD = np.dot(D, avg_dir)
+
+    t_lo = max(min(tA, tB), min(tC, tD))
+    t_hi = min(max(tA, tB), max(tC, tD))
+
+    if t_hi <= t_lo:
+        mid1 = (A + B) / 2
+        mid2 = (C + D) / 2
+        return abs(np.dot(mid2 - mid1, perp))
+
+    t_mid = (t_lo + t_hi) / 2
+
+    dAB = tB - tA
+    p1 = A + ((t_mid - tA) / dAB) * (B - A) if abs(dAB) > 1e-9 else (A + B) / 2
+
+    dCD = tD - tC
+    p2 = C + ((t_mid - tC) / dCD) * (D - C) if abs(dCD) > 1e-9 else (C + D) / 2
+
+    return abs(np.dot(p2 - p1, perp))
+
+
 def make_parabola(a, b, c, x_offset):
     """Build (curve_func, curve_deriv) for  y = a*(x-x0)^2 + b*(x-x0) + c."""
     def curve_func(x):

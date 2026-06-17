@@ -92,8 +92,25 @@ function _fetchInitialConfig() {
       if (cfg.dtm_loaded && cfg.dtm_bounds) {
         _applyDtmOverlay(cfg.dtm_bounds);
       }
+      if (cfg.angle_tolerance != null) {
+        _setAngleSliderBounds(cfg.angle_tolerance);
+      }
     })
     .catch(console.error);
+}
+
+// Bound the angle-deviation slider to ±ANGLE_TOLERANCE (parameters.py) instead
+// of an arbitrary ±90° range: the detector already discards anything outside
+// that tolerance of the per-line target angle, so the slider's full travel
+// should map onto the only deviations that ever actually occur.
+function _setAngleSliderBounds(tolDeg) {
+  const t = Math.abs(tolDeg);
+  const loEl = document.getElementById("filter-angle-lo");
+  const hiEl = document.getElementById("filter-angle-hi");
+  loEl.min = -t; loEl.max = t; loEl.value = -t;
+  hiEl.min = -t; hiEl.max = t; hiEl.value = t;
+  document.getElementById("val-angle-tol").textContent = `${-t}° to ${t}°`;
+  _applyFilters();
 }
 
 function _populateFolderDropdown() {
@@ -373,18 +390,50 @@ function toggleCorridor(show) {
 }
 
 // ---------------------------------------------------------------------------
-// Client-side line filters (angle tolerance + corridor distance)
+// Client-side line filters (angle deviation, corridor distance, wall spacing)
 // ---------------------------------------------------------------------------
-function _angleDiff(a, b) {
-  const d = Math.abs(a - b) % 180;
-  return d > 90 ? 180 - d : d;
+
+/**
+ * Signed deviation of `actual` from `target`, accounting for the
+ * 180°-periodicity of undirected line orientation (a line and its reverse
+ * are the same line). Range: (-90, 90].  Positive = rotated clockwise from
+ * the target; negative = counter-clockwise.
+ */
+function _angleSignedDiff(actual, target) {
+  let d = (actual - target) % 180;
+  if (d <= -90) d += 180;
+  else if (d > 90) d -= 180;
+  return d;
 }
 
-function onFilterChange() {
-  const tol  = parseInt(document.getElementById("filter-angle-tol").value);
+// Keep a dual-handle slider's lo <= hi by clamping the handle that just moved.
+function _clampDualSlider(loEl, hiEl, moved) {
+  let lo = parseFloat(loEl.value);
+  let hi = parseFloat(hiEl.value);
+  if (moved === "lo" && lo > hi) { lo = hi; loEl.value = lo; }
+  if (moved === "hi" && hi < lo) { hi = lo; hiEl.value = hi; }
+  return [lo, hi];
+}
+
+function onAngleFilterChange(moved) {
+  const loEl = document.getElementById("filter-angle-lo");
+  const hiEl = document.getElementById("filter-angle-hi");
+  const [lo, hi] = _clampDualSlider(loEl, hiEl, moved);
+  document.getElementById("val-angle-tol").textContent = `${lo}° to ${hi}°`;
+  _applyFilters();
+}
+
+function onCorridorDistChange() {
   const dist = parseInt(document.getElementById("filter-dist").value);
-  document.getElementById("val-angle-tol").textContent = tol + "°";
   document.getElementById("val-dist").textContent = dist.toLocaleString() + " m";
+  _applyFilters();
+}
+
+function onPairDistFilterChange(moved) {
+  const loEl = document.getElementById("filter-pairdist-lo");
+  const hiEl = document.getElementById("filter-pairdist-hi");
+  const [lo, hi] = _clampDualSlider(loEl, hiEl, moved);
+  document.getElementById("val-pairdist").textContent = `${lo} m to ${hi} m`;
   _applyFilters();
 }
 
@@ -395,13 +444,20 @@ function _applyFilters() {
     return;
   }
 
-  const tol  = parseInt(document.getElementById("filter-angle-tol").value);
-  const dist = parseInt(document.getElementById("filter-dist").value);
+  const angleLo  = parseFloat(document.getElementById("filter-angle-lo").value);
+  const angleHi  = parseFloat(document.getElementById("filter-angle-hi").value);
+  const corrDist = parseFloat(document.getElementById("filter-dist").value);
+  const pairLo   = parseFloat(document.getElementById("filter-pairdist-lo").value);
+  const pairHi   = parseFloat(document.getElementById("filter-pairdist-hi").value);
 
   const features = _rawGeojson.features.filter(f => {
     const p = f.properties;
-    if (p.expected_angle != null && _angleDiff(p.angle, p.expected_angle) > tol) return false;
-    if (p.corridor_dist_m != null && p.corridor_dist_m > dist) return false;
+    if (p.expected_angle != null) {
+      const dev = _angleSignedDiff(p.angle, p.expected_angle);
+      if (dev < angleLo || dev > angleHi) return false;
+    }
+    if (p.corridor_dist_m != null && p.corridor_dist_m > corrDist) return false;
+    if (p.pair_distance_m != null && (p.pair_distance_m < pairLo || p.pair_distance_m > pairHi)) return false;
     return true;
   });
 

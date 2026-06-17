@@ -13,11 +13,12 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
+import numpy as np
 from flask import Flask, jsonify, render_template, request, send_file
 
 import parameters
 from utils import (make_parabola, make_line, sample_corridor,
-                   annotate_lines_corridor)
+                   annotate_lines_corridor, perp_spacing_at_overlap)
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
@@ -59,6 +60,7 @@ def get_config():
         "dtm_loaded": state["dtm_bounds"] is not None,
         "dtm_bounds": state["dtm_bounds"],
         "corridor_mode": state["corridor_mode"],
+        "angle_tolerance": parameters.ANGLE_TOLERANCE,
     })
 
 
@@ -407,6 +409,39 @@ def _mark_osm_road_lines(lines: list, segs: list, threshold_m: float = parameter
 # Internal helpers
 # ---------------------------------------------------------------------------
 
+def _wall_angle_deg(raw_angle_rad: float) -> float:
+    """Convert a line_overlay.json line angle (radians, atan(dlat/dlon) in raw
+    geographic slope terms) into the same degrees / image-space, CCW-from-+x,
+    mod-180 convention that utils.corridor_angle_at() returns as
+    'expected_angle'. Without this conversion the two were being compared
+    directly despite different units (radians vs degrees) and different
+    conventions, so the angle-deviation filter was effectively comparing
+    unrelated numbers rather than a true relative tolerance."""
+    return (90.0 - math.degrees(raw_angle_rad)) % 180.0
+
+
+def _pair_spacing_m(line_a: dict, line_b: dict) -> float:
+    """Perpendicular spacing (m) between the two walls of a detected pair,
+    measured at the overlap of their along-wall extent (see
+    utils.perp_spacing_at_overlap) rather than naive midpoint-to-midpoint,
+    which is skewed when the two lines don't extend equally far."""
+    def _line_m(ln):
+        a = (ln["xs"] * _LON_M, ln["ys"] * _LAT_M)
+        b = (ln["xe"] * _LON_M, ln["ye"] * _LAT_M)
+        return a, b
+
+    def _unit_dir(line):
+        (x0, y0), (x1, y1) = line
+        length = math.hypot(x1 - x0, y1 - y0)
+        if length < 1e-9:
+            return np.array([1.0, 0.0])
+        return np.array([(x1 - x0) / length, (y1 - y0) / length])
+
+    line1 = _line_m(line_a)
+    line2 = _line_m(line_b)
+    return perp_spacing_at_overlap(line1, _unit_dir(line1), line2, _unit_dir(line2))
+
+
 def _load_lines(folder: str) -> list:
     state["osm_status"] = "idle"
     state["osm_road_count"] = 0
@@ -432,12 +467,19 @@ def _load_lines(folder: str) -> list:
                         "xs": xs, "ys": ys,
                         "xe": xe, "ye": ye,
                         "length": pair.get(f"{prefix}length", 0.0),
-                        "angle":  pair.get(f"{prefix}angle",  0.0),
+                        "angle":  _wall_angle_deg(pair.get(f"{prefix}angle", 0.0)),
                         "road": False,
                     })
 
+                # Spacing between the two walls of this pair (None if only one
+                # of the two lines was detected).
+                pair_distance_m = None
+                if extracted[0] is not None and extracted[1] is not None:
+                    pair_distance_m = _pair_spacing_m(extracted[0], extracted[1])
+
                 for ln in extracted:
                     if ln is not None:
+                        ln["pair_distance_m"] = pair_distance_m
                         lines.append(ln)
         except Exception as e:
             _push_error(f"Failed to load {os.path.basename(json_path)}: {e}")
@@ -546,6 +588,7 @@ def _to_geojson(lines: list) -> dict:
                 "road": ln.get("road", False),
                 "expected_angle": ln.get("expected_angle"),
                 "corridor_dist_m": ln.get("corridor_dist_m"),
+                "pair_distance_m": ln.get("pair_distance_m"),
             },
         })
     return {"type": "FeatureCollection", "features": features}
