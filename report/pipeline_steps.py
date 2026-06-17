@@ -29,13 +29,10 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.transforms import Bbox
 
-from road_model.process_dtm import (
-    getGTAndBand, get_window,
-    median_smooth_windowed, local_relief_model,
-    multiscale_ridge_enhancement,
-)
-from road_model.ridge_detection import detect_parallel_walls_ridge_pairing, remove_invalid_pairs, hessian_ridge_orientation
-from .report_utils import render_hillshaded_dtm, hillshade, save_figure, style_axes, pair_to_geo
+from road_model.ridge_detection import hessian_ridge_orientation
+from .base_compute import get_terrain, get_detection
+from .report_utils import (render_hillshaded_dtm, hillshade, save_figure, style_axes,
+                            pair_to_geo, pair_style, confirmed_pairs_label)
 from . import config as cfg
 import parameters
 
@@ -87,7 +84,8 @@ def _img(ax: plt.Axes, data: np.ndarray, label: str,
     ax.set_yticks([])
 
 
-def generate_pipeline_figure(coord: dict, dtm_path: str, output_dir: Path) -> None:
+def generate_pipeline_figure(coord: dict, dtm_path: str, output_dir: Path,
+                              use_cache: bool = True) -> None:
     """
     Build and save the 2×5 pipeline-steps figure for one coordinate.
 
@@ -96,46 +94,28 @@ def generate_pipeline_figure(coord: dict, dtm_path: str, output_dir: Path) -> No
     coord      : dict with keys 'name', 'lat', 'lon', 'size_m'
     dtm_path   : path to merged DTM GeoTIFF
     output_dir : parent output directory (a subdirectory named coord['name'] is created)
+    use_cache  : reuse cached DTM window / smoothing / LRM / detection if available
     """
     name = coord["name"]
     lat, lon = coord["lat"], coord["lon"]
-    size_m = coord.get("size_m", 200)
 
     print(f"  [pipeline] loading DTM window …")
-    gt, band, nodata, _ds = getGTAndBand(dtm_path)
-    raw, extent = get_window(lat, lon, size_m, size_m, gt, band, nodata)
-    if raw is None or raw.size == 0:
+    terrain = get_terrain(coord, dtm_path, output_dir, use_cache=use_cache)
+    if terrain is None:
         print(f"  [pipeline] no data — skipped.")
         return
+    raw, extent, nodata = terrain["raw"], terrain["extent"], terrain["nodata"]
+    smoothed, lrm = terrain["smoothed"], terrain["lrm"]
 
     ext = [extent[0], extent[1], extent[2], extent[3]]
 
-    # ── Pre-processing ────────────────────────────────────────────────────────
-    print(f"  [pipeline] pre-processing …")
-    smoothed = median_smooth_windowed(raw, nodata=nodata, radius=cfg.MEDIAN_SMOOTH_RADIUS)
-    lrm = local_relief_model(smoothed, radius=cfg.LRM_RADIUS, nodata=nodata)
-    ridge = multiscale_ridge_enhancement(lrm, scales=cfg.RIDGE_SCALES, nodata=nodata)
-
-    # ── Detection ─────────────────────────────────────────────────────────────
+    # ── Detection (cached: smoothing/LRM/ridge/pairing are the expensive parts) ─
     print(f"  [pipeline] detection steps …")
+    det = get_detection(coord, dtm_path, terrain, output_dir, use_cache=use_cache)
+    ridge, valid_ridge = det["ridge"], det["valid_ridge"]
+    binary, closed, skeleton, labeled = det["binary"], det["closed"], det["skeleton"], det["labeled"]
+    pairs = det["pairs_clean"]
     nd_mask = raw == nodata
-    valid_ridge = np.where(nd_mask, 0.0, ridge.astype(float))
-
-    pairs, (binary, closed, skeleton, labeled, _) = detect_parallel_walls_ridge_pairing(
-        ridge_map=valid_ridge,
-        target_angle=cfg.TARGET_ANGLE,
-        extent=extent,
-        spacing_meters=cfg.SPACING_METERS,
-        angle_tolerance=cfg.ANGLE_TOLERANCE,
-        spacing_tolerance=cfg.SPACING_TOLERANCE,
-        ridge_threshold=cfg.RIDGE_THRESHOLD,
-        min_ridge_length_meters=cfg.MIN_RIDGE_LENGTH_METERS,
-        overlap_ratio=cfg.OVERLAP_RATIO,
-        #orientation_source=lrm,
-        return_debug=True,
-    )
-    pairs = remove_invalid_pairs(pairs, angle_tolerance=cfg.ANGLE_TOLERANCE,
-                                  target_angle=cfg.TARGET_ANGLE)
 
     # ── Build figure  (2 rows × 7 columns) ───────────────────────────────────
     print(f"  [pipeline] composing figure …")
@@ -231,7 +211,7 @@ def generate_pipeline_figure(coord: dict, dtm_path: str, output_dir: Path) -> No
 
     # Panel 12. — pairs on hillshaded DTM
     axes[1, 4].imshow(hs_raw, origin="upper", extent=ext, aspect="auto")
-    COLORS = ["#ff4444", "#4499ff"]
+    true_idx = coord.get("true_positive_pair_index")
 
     # Pixel → metres conversion at the window centre latitude
     rows_n, cols_n = raw.shape
@@ -240,13 +220,15 @@ def generate_pipeline_figure(coord: dict, dtm_path: str, output_dir: Path) -> No
                 * np.cos(np.radians(centre_lat))
                 + (extent[3] - extent[2]) / rows_n * 111_320.0) / 2
 
-    for pair in pairs[:12]:
+    for idx, pair in enumerate(pairs[:12]):
+        style = pair_style(idx, true_idx)
         geo_segs = pair_to_geo(pair, extent, raw.shape)
         for k, ((gx0, gy0), (gx1, gy1)) in enumerate(geo_segs):
             axes[1, 4].plot([gx0, gx1], [gy0, gy1],
-                            color=COLORS[k], linewidth=2.0, alpha=0.85)
+                            color=style["colors"][k], linewidth=style["linewidth"],
+                            alpha=style["alpha"], zorder=style["zorder"])
 
-        # Spacing label at the midpoint between the two line midpoints
+        # Index + spacing label at the midpoint between the two line midpoints
         (ax0, ay0), (ax1, ay1) = geo_segs[0]
         (bx0, by0), (bx1, by1) = geo_segs[1]
         mid_ax, mid_ay = (ax0 + ax1) / 2, (ay0 + ay1) / 2
@@ -255,16 +237,18 @@ def generate_pipeline_figure(coord: dict, dtm_path: str, output_dir: Path) -> No
         label_lat = (mid_ay + mid_by) / 2
         spacing_m = pair["spacing"] * m_per_px
         axes[1, 4].annotate(
-            f"{spacing_m:.0f} m",
+            f"{style['label_text']}  {spacing_m:.0f} m",
             xy=(label_lon, label_lat),
-            fontsize=6.5, color="white", fontweight="bold",
-            ha="center", va="center",
+            fontsize=6.5, color=style["label_color"], fontweight="bold",
+            ha="center", va="center", zorder=style["zorder"] + 1,
             bbox=dict(boxstyle="round,pad=0.15", facecolor="#000000",
                       alpha=0.6, edgecolor="none"),
         )
 
-    style_axes(axes[1, 4],
-               f"12. Detected Pairs  ({len(pairs)} pair{'s' if len(pairs) != 1 else ''})")
+    pairs_title = f"12. Detected Pairs  ({len(pairs)} pair{'s' if len(pairs) != 1 else ''})"
+    if true_idx is not None:
+        pairs_title += f"  ·  {confirmed_pairs_label(true_idx)} confirmed"
+    style_axes(axes[1, 4], pairs_title)
     axes[1, 4].set_xticks([]); axes[1, 4].set_yticks([])
 
     # Panel 13. — visual diagnostic hillshade next to detected pairs

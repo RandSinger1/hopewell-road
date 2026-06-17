@@ -18,11 +18,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.lines as mlines
 
-from road_model.process_dtm import (
-    getGTAndBand, get_window,
-    median_smooth_windowed, local_relief_model, multiscale_ridge_enhancement,
-)
-from road_model.ridge_detection import detect_parallel_walls_ridge_pairing, remove_invalid_pairs
+from .base_compute import get_terrain, get_detection
 from .report_utils import save_figure
 from . import config as cfg
 import parameters
@@ -39,39 +35,22 @@ _HALF_LINE_M = 5_000
 
 # ── detection ─────────────────────────────────────────────────────────────────
 
-def _run_detection(coord: dict, dtm_path: str) -> dict:
-    lat, lon   = coord["lat"], coord["lon"]
-    size_m     = coord.get("size_m", 200)
-    fallback   = cfg.ROAD_BEARING_DEG % 180
-    base       = {**coord, "bearing": fallback, "detected": False,
-                  "raw": None, "lrm": None, "extent": None,
-                  "nodata": parameters.NODATA, "pairs": []}
+def _run_detection(coord: dict, dtm_path: str, output_dir: Path,
+                    use_cache: bool = True) -> dict:
+    fallback = cfg.ROAD_BEARING_DEG % 180
+    base     = {**coord, "bearing": fallback, "detected": False,
+                "raw": None, "lrm": None, "extent": None,
+                "nodata": parameters.NODATA, "pairs": []}
     try:
-        gt, band, nodata, _ds = getGTAndBand(dtm_path)
-        raw, extent = get_window(lat, lon, size_m, size_m, gt, band, nodata)
-        if raw is None or raw.size == 0:
+        terrain = get_terrain(coord, dtm_path, output_dir, use_cache=use_cache)
+        if terrain is None:
             return base
-
-        smoothed    = median_smooth_windowed(raw, nodata=nodata, radius=cfg.MEDIAN_SMOOTH_RADIUS)
-        lrm         = local_relief_model(smoothed, radius=cfg.LRM_RADIUS, nodata=nodata)
-        ridge       = multiscale_ridge_enhancement(lrm, scales=cfg.RIDGE_SCALES, nodata=nodata)
-        valid_ridge = np.where(raw == nodata, 0.0, ridge.astype(float))
-
-        result = detect_parallel_walls_ridge_pairing(
-            ridge_map=valid_ridge,
-            target_angle=cfg.TARGET_ANGLE,
-            extent=extent,
-            spacing_meters=cfg.SPACING_METERS,
-            angle_tolerance=cfg.ANGLE_TOLERANCE,
-            spacing_tolerance=cfg.SPACING_TOLERANCE,
-            ridge_threshold=cfg.RIDGE_THRESHOLD,
-            min_ridge_length_meters=cfg.MIN_RIDGE_LENGTH_METERS,
-            overlap_ratio=cfg.OVERLAP_RATIO,
-            return_debug=True,
+        raw, extent, nodata, lrm = (
+            terrain["raw"], terrain["extent"], terrain["nodata"], terrain["lrm"],
         )
-        pairs = result[0] if isinstance(result, tuple) else result
-        pairs = remove_invalid_pairs(pairs, angle_tolerance=cfg.ANGLE_TOLERANCE,
-                                     target_angle=cfg.TARGET_ANGLE)
+
+        det = get_detection(coord, dtm_path, terrain, output_dir, use_cache=use_cache)
+        pairs = det["pairs_clean"]
 
         bearing  = fallback
         detected = False
@@ -244,12 +223,13 @@ def _save_site_figure(focus: dict, all_sites: list[dict], output_dir: Path) -> N
 
 # ── main entry point ──────────────────────────────────────────────────────────
 
-def generate_overview_map(coords: list[dict], dtm_path: str, output_dir: Path) -> None:
+def generate_overview_map(coords: list[dict], dtm_path: str, output_dir: Path,
+                           use_cache: bool = True) -> None:
     print("  [overview] running detection at each site …")
 
     sites: list[dict] = []
     for coord in coords:
-        s = _run_detection(coord, dtm_path)
+        s = _run_detection(coord, dtm_path, output_dir, use_cache=use_cache)
         tag = "detected" if s["detected"] else f"fallback {cfg.ROAD_BEARING_DEG:.0f}°"
         print(f"    {s['name']}: {s['bearing']:.1f}°  ({tag})")
         sites.append(s)

@@ -184,3 +184,52 @@ def pair_to_geo(pair: dict, extent: list, shape: tuple) -> list:
         gy1 = extent[2] + (rows - y1 - 0.5) * dy
         geo.append(((gx0, gy0), (gx1, gy1)))
     return geo
+
+
+# ─── True-positive / false-positive pair styling ──────────────────────────────
+
+TP_COLORS = ("#ff4444", "#4499ff")   # line1 / line2 colour when confirmed (or unmarked)
+FP_COLOR = "#666666"                 # both lines, dimmed grey, when marked a false positive
+
+
+def confirmed_pair_indices(true_positive_idx) -> set:
+    """
+    Normalize a REPORT_COORDS "true_positive_pair_index" value into a set of
+    confirmed indices. Accepts None, a single int, or a list/tuple/set of ints.
+    """
+    if true_positive_idx is None:
+        return set()
+    if isinstance(true_positive_idx, (list, tuple, set)):
+        return set(true_positive_idx)
+    return {true_positive_idx}
+
+
+def confirmed_pairs_label(true_positive_idx) -> str:
+    """Human-readable '#0, #2' label for one or more confirmed pair indices."""
+    return ", ".join(f"#{i}" for i in sorted(confirmed_pair_indices(true_positive_idx)))
+
+
+def pair_style(idx: int, true_positive_idx) -> dict:
+    """
+    Drawing style for detected pair `idx`, given the coordinate's configured
+    true_positive_pair_index (None if not yet confirmed; an int or a
+    list/tuple/set of ints if one or more pairs have been confirmed).
+
+    Unmarked (true_positive_idx is None): every pair drawn at full strength,
+    labelled with its index, so the index can be read off the figure and
+    written into REPORT_COORDS as "true_positive_pair_index".
+
+    Marked: only the confirmed indices are drawn at full strength; every
+    other pair is greyed out (kept visible, not removed, for context).
+    """
+    confirmed = confirmed_pair_indices(true_positive_idx)
+    is_unmarked = not confirmed
+    is_confirmed = is_unmarked or idx in confirmed
+    return {
+        "colors": list(TP_COLORS) if is_confirmed else [FP_COLOR, FP_COLOR],
+        "linewidth": 2.2 if is_confirmed else 1.0,
+        "alpha": 0.9 if is_confirmed else 0.35,
+        "zorder": 5 if is_confirmed else 1,
+        "label_color": "white" if is_confirmed else "#999999",
+        "label_text": (f"#{idx}" if is_unmarked else f"#{idx} ✓") if is_confirmed else f"#{idx}",
+    }

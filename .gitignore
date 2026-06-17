@@ -39,6 +39,9 @@ env/
 # App tile cache
 app/.dtm_cache
 
+# Report cache (cached DTM/detection intermediates — regenerated on demand)
+report/output/*/.cache/
+
 # IDE / tooling
 .vscode/settings.json
 .claude

@@ -36,12 +36,11 @@ from mpl_toolkits.mplot3d import Axes3D   # noqa: F401 (registers 3D projection)
 from scipy.ndimage import map_coordinates
 from scipy.signal import find_peaks
 
-from road_model.process_dtm import (
-    getGTAndBand, get_window,
-    median_smooth_windowed, local_relief_model, multiscale_ridge_enhancement,
-)
-from road_model.ridge_detection import detect_parallel_walls_ridge_pairing, remove_invalid_pairs
-from .report_utils import hillshade, render_hillshaded_dtm, save_figure, style_axes, pair_to_geo, sample_profile
+from road_model.process_dtm import multiscale_ridge_enhancement
+from .base_compute import get_terrain, get_detection
+from .report_utils import (hillshade, render_hillshaded_dtm, save_figure, style_axes,
+                            pair_to_geo, sample_profile, pair_style,
+                            confirmed_pair_indices, confirmed_pairs_label)
 from . import config as cfg
 
 
@@ -77,7 +76,8 @@ def _multi_azimuth_hillshade(raw: np.ndarray, extent: list, nodata: float,
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _3d_perspective(raw: np.ndarray, extent: list, nodata: float,
-                     name: str, output_dir: Path, pairs: list) -> None:
+                     name: str, output_dir: Path, pairs: list,
+                     true_positive_idx: int | list[int] | None = None) -> None:
     rows, cols = raw.shape
     # Downsample to ≤200×200 for render performance
     step = max(1, max(rows, cols) // 200)
@@ -107,13 +107,14 @@ def _3d_perspective(raw: np.ndarray, extent: list, nodata: float,
 
     # Project detected wall pairs just above the surface
     z_top = vmax + (vmax - vmin) * 0.02
-    COLORS_3D = ["#ff4444", "#4499ff"]
-    for pair in pairs[:10]:
+    for idx, pair in enumerate(pairs[:10]):
+        style = pair_style(idx, true_positive_idx)
         for k, geo_seg in enumerate(pair_to_geo(pair, extent, raw.shape)):
             (gx0, gy0), (gx1, gy1) = geo_seg
             ax.plot(
                 [gx0, gx1], [gy0, gy1], [z_top, z_top],
-                color=COLORS_3D[k], linewidth=2.5, alpha=0.9, zorder=10,
+                color=style["colors"][k], linewidth=style["linewidth"] * 1.1,
+                alpha=style["alpha"], zorder=10 + style["zorder"],
             )
 
     cbar = fig.colorbar(surf, ax=ax, shrink=0.45, aspect=14, pad=0.08)
@@ -124,9 +125,10 @@ def _3d_perspective(raw: np.ndarray, extent: list, nodata: float,
     ax.set_ylabel("Latitude",  color="lightgray", fontsize=8, labelpad=6)
     ax.set_zlabel("Elev (m)",  color="lightgray", fontsize=8, labelpad=6)
     ax.tick_params(colors="gray", labelsize=6)
+    pairs_note = f"({len(pairs)} wall pair{'s' if len(pairs) != 1 else ''} overlaid"
+    pairs_note += f", {confirmed_pairs_label(true_positive_idx)} confirmed)" if true_positive_idx is not None else ")"
     ax.set_title(
-        f"3D Terrain  ·  {name.replace('_', ' ')}  "
-        f"({'%d' % len(pairs)} wall pair{'s' if len(pairs) != 1 else ''} overlaid)",
+        f"3D Terrain  ·  {name.replace('_', ' ')}  {pairs_note}",
         color="white", fontsize=11, pad=10,
     )
     ax.view_init(elev=35, azim=225)
@@ -314,9 +316,14 @@ def _road_elevation_profile(smoothed: np.ndarray, extent: list, nodata: float,
 def _detected_pair_profiles(raw: np.ndarray, smoothed: np.ndarray, lrm: np.ndarray,
                              extent: list, nodata: float,
                              pairs: list, name: str, output_dir: Path,
-                             n_cross: int = 10) -> None:
+                             n_cross: int = 10,
+                             pair_idx: int = None,
+                             file_suffix: str = "") -> None:
     """
-    Four-panel figure for the longest detected wall pair.
+    Four-panel figure for one detected wall pair: `pair_idx` if given (a
+    single confirmed true-positive index), otherwise the longest-pair
+    heuristic. To render more than one confirmed pair, call this once per
+    index with a distinct `file_suffix` (see generate_extra_views).
 
     Top row  — hillshaded DTM (unchanged) and LRM (slope-normalised) map views,
                with detected wall lines and n_cross colour-coded transect lines
@@ -339,7 +346,12 @@ def _detected_pair_profiles(raw: np.ndarray, smoothed: np.ndarray, lrm: np.ndarr
             np.hypot(l2[1][0] - l2[0][0], l2[1][1] - l2[0][1]),
         )
 
-    pair = max(pairs, key=_pair_min_length)
+    if pair_idx is not None and 0 <= pair_idx < len(pairs):
+        pair = pairs[pair_idx]
+        pair_source = f"confirmed pair #{pair_idx}"
+    else:
+        pair = max(pairs, key=_pair_min_length)
+        pair_source = "longest pair (unconfirmed)"
     spacing_m = pair['spacing'] * px_m
 
     geo_segs = pair_to_geo(pair, extent, raw.shape)
@@ -435,7 +447,7 @@ def _detected_pair_profiles(raw: np.ndarray, smoothed: np.ndarray, lrm: np.ndarr
     fig = plt.figure(figsize=(18, 14), facecolor="#1a1a1a")
     fig.suptitle(
         f"Detected-Pair Cross Sections  ·  {name.replace('_', ' ')}  "
-        f"·  {n_valid} transects  ·  {spacing_m:.0f} m wall spacing  "
+        f"·  {pair_source}  ·  {n_valid} transects  ·  {spacing_m:.0f} m wall spacing  "
         f"·  bearing {wall_bearing:.0f}°",
         fontsize=12, color="white", y=0.985,
     )
@@ -536,14 +548,15 @@ def _detected_pair_profiles(raw: np.ndarray, smoothed: np.ndarray, lrm: np.ndarr
     cbar_pos.set_label("Along-wall position (m from centroid)", color="lightgray", fontsize=8)
     cbar_pos.ax.yaxis.set_tick_params(colors="gray")
 
-    save_figure(fig, output_dir / name, "detected_pair_profiles.png", dpi=cfg.DPI)
+    save_figure(fig, output_dir / name, f"detected_pair_profiles{file_suffix}.png", dpi=cfg.DPI)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Main dispatcher
 # ─────────────────────────────────────────────────────────────────────────────
 
-def generate_extra_views(coord: dict, dtm_path: str, output_dir: Path) -> None:
+def generate_extra_views(coord: dict, dtm_path: str, output_dir: Path,
+                          use_cache: bool = True) -> None:
     """
     Generate all supplementary figures for one coordinate.
 
@@ -552,45 +565,31 @@ def generate_extra_views(coord: dict, dtm_path: str, output_dir: Path) -> None:
     coord      : dict with keys 'name', 'lat', 'lon', 'size_m'
     dtm_path   : path to merged DTM GeoTIFF
     output_dir : parent output directory
+    use_cache  : reuse cached DTM window / smoothing / LRM / detection if available
     """
     name = coord["name"]
     lat, lon = coord["lat"], coord["lon"]
-    size_m = coord.get("size_m", 200)
 
     print(f"  [extra_views] loading DTM window …")
-    gt, band, nodata, _ds = getGTAndBand(dtm_path)
-    raw, extent = get_window(lat, lon, size_m, size_m, gt, band, nodata)
-    if raw is None or raw.size == 0:
+    terrain = get_terrain(coord, dtm_path, output_dir, use_cache=use_cache)
+    if terrain is None:
         print(f"  [extra_views] no data — skipped.")
         return
+    raw, extent, nodata = terrain["raw"], terrain["extent"], terrain["nodata"]
+    smoothed, lrm = terrain["smoothed"], terrain["lrm"]
 
-    smoothed = median_smooth_windowed(raw, nodata=nodata, radius=cfg.MEDIAN_SMOOTH_RADIUS)
-    lrm = local_relief_model(smoothed, nodata=nodata)
-
-    # Run detection once so the 3D view can overlay pairs
-    ridge_for_pairs = multiscale_ridge_enhancement(lrm, scales=cfg.RIDGE_SCALES, nodata=nodata)
-    valid_ridge = np.where(raw == nodata, 0.0, ridge_for_pairs.astype(float))
-    pairs = detect_parallel_walls_ridge_pairing(
-        ridge_map=valid_ridge,
-        target_angle=cfg.TARGET_ANGLE,
-        extent=extent,
-        spacing_meters=cfg.SPACING_METERS,
-        angle_tolerance=cfg.ANGLE_TOLERANCE,
-        spacing_tolerance=cfg.SPACING_TOLERANCE,
-        ridge_threshold=cfg.RIDGE_THRESHOLD,
-        min_ridge_length_meters=cfg.MIN_RIDGE_LENGTH_METERS,
-        overlap_ratio=cfg.OVERLAP_RATIO,
-        #orientation_source=lrm,
-        return_debug=False
-    )
-    # pairs = remove_invalid_pairs(pairs, angle_tolerance=cfg.ANGLE_TOLERANCE,
-    #                              target_angle=cfg.TARGET_ANGLE)
+    # Detection (cached). Uses pairs_clean (remove_invalid_pairs applied) so a
+    # pair index read off pipeline_steps.py's "Detected Pairs" panel refers to
+    # the same pair here.
+    det = get_detection(coord, dtm_path, terrain, output_dir, use_cache=use_cache)
+    pairs = det["pairs_clean"]
+    true_idx = coord.get("true_positive_pair_index")
 
     print(f"  [extra_views] multi-azimuth hillshade …")
     _multi_azimuth_hillshade(raw, extent, nodata, name, output_dir)
 
     print(f"  [extra_views] 3D perspective …")
-    _3d_perspective(raw, extent, nodata, name, output_dir, pairs)
+    _3d_perspective(raw, extent, nodata, name, output_dir, pairs, true_positive_idx=true_idx)
 
     print(f"  [extra_views] ridge-scale comparison …")
     _ridge_scale_comparison(smoothed, extent, nodata, name, output_dir)
@@ -602,4 +601,11 @@ def generate_extra_views(coord: dict, dtm_path: str, output_dir: Path) -> None:
     _road_elevation_profile(smoothed, extent, nodata, lat, lon, name, output_dir)
 
     print(f"  [extra_views] detected-pair cross sections …")
-    _detected_pair_profiles(raw, smoothed, lrm, extent, nodata, pairs, name, output_dir)
+    confirmed = sorted(confirmed_pair_indices(true_idx))
+    if confirmed:
+        multi = len(confirmed) > 1
+        for i in confirmed:
+            _detected_pair_profiles(raw, smoothed, lrm, extent, nodata, pairs, name, output_dir,
+                                     pair_idx=i, file_suffix=f"_{i}" if multi else "")
+    else:
+        _detected_pair_profiles(raw, smoothed, lrm, extent, nodata, pairs, name, output_dir)

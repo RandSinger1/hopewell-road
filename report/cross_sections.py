@@ -20,35 +20,43 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 
-from road_model.process_dtm import getGTAndBand, get_window, median_smooth_windowed, local_relief_model
-from .report_utils import sample_profile, save_figure, style_axes
+from .base_compute import get_terrain
+from .report_utils import sample_profile, save_figure, style_axes, confirmed_pair_indices
 from . import config as cfg
 
 
-def generate_cross_section_figure(coord: dict, dtm_path: str, output_dir: Path) -> None:
+def generate_cross_section_figure(coord: dict, dtm_path: str, output_dir: Path,
+                                   use_cache: bool = True) -> None:
     """
     Build and save the cross-section figure for one coordinate.
+
+    Only runs once at least one wall pair has been confirmed via
+    "true_positive_pair_index" (see REPORT_COORDS in parameters.py) — until
+    then there's no confirmed earthwork to sanity-check against the assumed
+    road bearing, so the figure is skipped.
 
     Parameters
     ----------
     coord      : dict with keys 'name', 'lat', 'lon', 'size_m'
     dtm_path   : path to merged DTM GeoTIFF
     output_dir : parent output directory
+    use_cache  : reuse cached DTM window / smoothing / LRM if available
     """
     name = coord["name"]
+    if not confirmed_pair_indices(coord.get("true_positive_pair_index")):
+        print(f"  [cross_sections] no confirmed true-positive pair — skipped.")
+        return
     lat, lon = coord["lat"], coord["lon"]
-    size_m = coord.get("size_m", 200)
     bearing = cfg.ROAD_BEARING_DEG
 
     print(f"  [cross_sections] loading DTM window …")
-    gt, band, nodata, _ds = getGTAndBand(dtm_path)
-    raw, extent = get_window(lat, lon, size_m, size_m, gt, band, nodata)
-    if raw is None or raw.size == 0:
+    terrain = get_terrain(coord, dtm_path, output_dir, use_cache=use_cache)
+    if terrain is None:
         print(f"  [cross_sections] no data — skipped.")
         return
-
-    smoothed = median_smooth_windowed(raw, nodata=nodata, radius=cfg.MEDIAN_SMOOTH_RADIUS)
-    lrm = local_relief_model(smoothed, nodata=nodata)
+    smoothed, extent, nodata, lrm = (
+        terrain["smoothed"], terrain["extent"], terrain["nodata"], terrain["lrm"],
+    )
 
     # Road direction unit vector (east, north) from bearing (CW from north)
     road_east = np.sin(np.radians(bearing))

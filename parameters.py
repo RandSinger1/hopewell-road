@@ -396,25 +396,36 @@ REPORT_DPI: int = 150
 REPORT_COORDS: list = [
     # Each entry: name (used in filenames), lat/lon (WGS-84), size_m (half-window).
     # 'note' is displayed in the run log only; it does not affect processing.
+    # Optional 'true_positive_pair_index': index (or list of indices) of the
+    # detected wall pair(s) that are the real earthwork, when more than one
+    # parallel-wall pair is detected. Workflow: run the report once, read the
+    # pair indices off the "12. Detected Pairs" panel in pipeline_steps.png
+    # (every pair is drawn and labelled #0, #1, ... on that first pass), set
+    # this key to that index (e.g. 0) or a list of indices (e.g. [0, 2]) if
+    # more than one pair is a confirmed earthwork, then run again — the
+    # confirmed pair(s) are highlighted and all others greyed out.
     {
         "name": "Van Voorhis Wall",
         "lat":   40.0, "lon": -82.4, "size_m": 200,
         "note": "Ground truth — confirmed earthwork, 41 m width",
+        "true_positive_pair_index": [0, 8]
     },
 {
         "name": "Beaver Run",
         "lat":   39.9, "lon": -82.5, "size_m": 200,
-        "note": "Proposed route, 37 m width"
+        "note": "Proposed route, 37 m width",
+        "true_positive_pair_index": 0
     },
     {
         "name": "Route 40",
         "lat":   39.9, "lon": -82.5, "size_m": 200,
         "note": "Proposed route, 33 m width",
+        "true_positive_pair_index": 1
     },
     {
         "name": "Blacklick Eastern",
         "lat": 39.9, "lon": -82.5, "size_m": 200,
-        "note": "Proposed route"
+        "note": "Proposed route"    
     },
     {
         "name": "Route 159",
@@ -424,7 +435,8 @@ REPORT_COORDS: list = [
     {
         "name": "Canal Rd",
         "lat":   39.8, "lon": -82.5, "size_m": 200,
-        "note": "Proposed route"
+        "note": "Proposed route",
+        "true_positive_pair_index": 0
     }
     # {
     #     "name": "Examine Later 3",
