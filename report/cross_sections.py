@@ -21,7 +21,8 @@ import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 
 from .base_compute import get_terrain
-from .report_utils import sample_profile, save_figure, style_axes, confirmed_pair_indices
+from .report_utils import (sample_profile, save_figure, style_axes,
+                            confirmed_pair_indices, site_target_angle)
 from . import config as cfg
 
 
@@ -47,7 +48,8 @@ def generate_cross_section_figure(coord: dict, dtm_path: str, output_dir: Path,
         print(f"  [cross_sections] no confirmed true-positive pair — skipped.")
         return
     lat, lon = coord["lat"], coord["lon"]
-    bearing = cfg.ROAD_BEARING_DEG
+    mode, bearing = site_target_angle(coord)
+    print(f"  [cross_sections] target bearing {bearing:.1f}°  (mode={mode})")
 
     print(f"  [cross_sections] loading DTM window …")
     terrain = get_terrain(coord, dtm_path, output_dir, use_cache=use_cache)

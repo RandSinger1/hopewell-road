@@ -8,9 +8,34 @@ from docx import Document
 from docx.shared import Pt, Inches
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 import parameters
+from .report_utils import site_target_angle
+from utils import make_line, corridor_angle_at
 
 OUTPUT_DIR = Path(__file__).parent / "output"
 fig_counter = [0]
+
+# Pipeline-steps detail (section 3.3) walks through the Van Voorhis Wall site
+# specifically, so its target bearing — not a corridor-wide constant — is
+# what the figures it references actually used (see base_compute.get_detection
+# / utils.corridor_mode_and_angle for the mode/parabola logic).
+_VAN_VOORHIS = next(c for c in parameters.REPORT_COORDS if c["name"] == "Van Voorhis Wall")
+_VV_MODE, _VV_ANGLE = site_target_angle(_VAN_VOORHIS)
+_VV_PERP_AZIMUTH = (_VV_ANGLE + 90.0) % 360.0
+
+# Fixed bearings of the two straight-line corridor legs (used in section 4's
+# parameter table). The 'circleville' leg is a parabola, so it has no single
+# bearing — its tangent angle varies continuously (see corridor_mode_and_angle).
+_, _CHILLICOTHE_DERIV = make_line(
+    parameters.CHILLICOTHE_COORD[1], parameters.CHILLICOTHE_COORD[0],
+    parameters.NEWARK_COORD[1], parameters.NEWARK_COORD[0],
+)
+_CHILLICOTHE_BEARING = corridor_angle_at(_CHILLICOTHE_DERIV, parameters.CHILLICOTHE_COORD[1])
+
+_, _HIGH_BANKS_DERIV = make_line(
+    parameters.HIGH_BANKS_COORD[1], parameters.HIGH_BANKS_COORD[0],
+    parameters.NEWARK_COORD[1], parameters.NEWARK_COORD[0],
+)
+_HIGH_BANKS_BEARING = corridor_angle_at(_HIGH_BANKS_DERIV, parameters.HIGH_BANKS_COORD[1])
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -128,7 +153,7 @@ def add_pipeline_steps_detail(doc, site_dir):
                 f"(computed after Gaussian smoothing at sigma = {parameters.HESSIAN_SIGMA} px).  "
                 f"The orientation lies in [0°, 180°) and is displayed via the cyclic HSV colourmap.  "
                 f"The cyan dashed line on the colourbar marks the target bearing "
-                f"({parameters.TARGET_ANGLE:.0f}° from the horizontal axis).  "
+                f"({_VV_ANGLE:.0f}° from the horizontal axis, '{_VV_MODE}' corridor mode).  "
                 f"Only pixels above a low background ridge-response threshold are shown; "
                 f"transparent pixels carry no significant ridge signal."
             ),
@@ -138,7 +163,7 @@ def add_pipeline_steps_detail(doc, site_dir):
             "Step 7: Angle Deviation",
             (
                 f"For each ridge pixel, the absolute angular difference between its Hessian orientation "
-                f"and the target bearing ({parameters.TARGET_ANGLE:.0f}°) is computed and folded into "
+                f"and the target bearing ({_VV_ANGLE:.0f}°) is computed and folded into "
                 f"[0°, 90°] to respect the 180° ambiguity of orientation.  The RdYlGn_r colourmap "
                 f"maps 0° (perfect alignment) to green and 90° (perpendicular) to red.  "
                 f"The cyan dashed line marks the acceptance threshold of +/-{parameters.ANGLE_TOLERANCE:.0f}°.  "
@@ -153,7 +178,7 @@ def add_pipeline_steps_detail(doc, site_dir):
                 f"The initial binary ridge mask: all pixels whose Frangi response exceeds the amplitude "
                 f"threshold (t = {parameters.RIDGE_THRESHOLD}) AND whose Hessian orientation deviates no "
                 f"more than ±{parameters.ANGLE_TOLERANCE:.0f}° from the target bearing "
-                f"({parameters.TARGET_ANGLE:.0f}°) are set to 1.  All other pixels are 0.  "
+                f"({_VV_ANGLE:.0f}°) are set to 1.  All other pixels are 0.  "
                 f"This is the raw candidate set prior to any morphological processing.  "
                 f"True earthwork ridges should appear as oriented bright ribbons; isotropic noise, "
                 f"mis-oriented features, and sub-threshold returns are suppressed.  "
@@ -214,10 +239,11 @@ def add_pipeline_steps_detail(doc, site_dir):
         ),
         (
             "13_hillshade_perp32",
-            "Visual Diagnostic: Hillshade Perpendicular to 32°",
+            f"Visual Diagnostic: Hillshade Perpendicular to {_VV_ANGLE:.0f}°",
             (
-                f"A directional hillshade with illumination from azimuth 122° (perpendicular to the "
-                f"expected {parameters.TARGET_ANGLE:.0f}° corridor bearing), solar elevation 20°, and "
+                f"A directional hillshade with illumination from azimuth {_VV_PERP_AZIMUTH:.0f}° "
+                f"(perpendicular to the expected {_VV_ANGLE:.0f}° corridor bearing at this site), "
+                f"solar elevation 20°, and "
                 f"vertical exaggeration z = 4.  This panel is not part of the processing pipeline; "
                 f"it is computed from the smoothed DTM for visual confirmation that the expected "
                 f"earthwork ridges are present and oriented correctly before the algorithm is applied."
@@ -323,6 +349,19 @@ add_para(doc, (
     f"Tiles are included if their centre falls within {parameters.CORRIDOR_HALF_WIDTH_M/1000:.1f} km "
     f"({parameters.CORRIDOR_HALF_WIDTH_M:,.0f} m) of this centreline."
 ))
+add_para(doc, (
+    "The corridor is not a single straight line, so neither is the expected wall bearing: "
+    "three named segments radiate south from Newark — the Circleville leg (the parabola above, "
+    "whose tangent direction varies continuously along its length), and two straight legs to "
+    f"Chillicothe ({parameters.CHILLICOTHE_COORD[0]}, {parameters.CHILLICOTHE_COORD[1]}) and "
+    f"High Banks ({parameters.HIGH_BANKS_COORD[0]}, {parameters.HIGH_BANKS_COORD[1]}), each with "
+    "one fixed bearing along its length.  For each site in this report, the segment passing "
+    "closest to it determines its locally expected wall bearing, which is then used both as the "
+    "orientation target for Hessian ridge filtering (section 3.3, step 6) and as the road bearing "
+    "for perpendicular cross-section sampling (section 5).  Sites near Newark, where all three "
+    f"segments converge, resolve to approximately the same bearing (~{_VV_ANGLE:.0f}°); sites "
+    "further south diverge depending on which leg they sit nearest."
+))
 
 
 # ── 3. Methodology ────────────────────────────────────────────────────────────
@@ -389,7 +428,7 @@ param_rows = [
     ("Frangi threshold",         str(parameters.RIDGE_THRESHOLD)),
     ("Hessian orientation σ",    f"{parameters.HESSIAN_SIGMA} px"),
     ("Orientation tolerance",    f"±{parameters.ANGLE_TOLERANCE}°"),
-    ("Expected wall bearing",    f"{parameters.ROAD_BEARING_DEG}° from north"),
+    ("Expected wall bearing (near Newark)", f"{parameters.ROAD_BEARING_DEG}° from north"),
     ("Morph. closing radius",    f"{int(parameters.MORPH_DISK_RADIUS)} px"),
     ("Min. component size",      f"{parameters.BINARY_MIN_OBJECT_SIZE} px²"),
     ("Min. ridge length",        f"{parameters.MIN_RIDGE_LENGTH_METERS} m"),
@@ -401,10 +440,15 @@ param_rows = [
     ("Circleville anchor (lat, lon)", f"{parameters.CIRCLEVILLE_COORD[0]}, {parameters.CIRCLEVILLE_COORD[1]}"),
     ("Newark anchor (lat, lon)",      f"{parameters.NEWARK_COORD[0]}, {parameters.NEWARK_COORD[1]}"),
     ("Chillicothe anchor (lat, lon)", f"{parameters.CHILLICOTHE_COORD[0]}, {parameters.CHILLICOTHE_COORD[1]}"),
-    ("Corridor centreline",
+    ("High Banks anchor (lat, lon)",  f"{parameters.HIGH_BANKS_COORD[0]}, {parameters.HIGH_BANKS_COORD[1]}"),
+    ("Corridor mode: circleville (parabola, Circleville↔Newark)",
      f"y = {parameters.PARABOLA_A}*(x - {parameters.PARABOLA_X_OFFSET})^2 "
      f"+ {parameters.PARABOLA_B}*(x - {parameters.PARABOLA_X_OFFSET}) "
-     f"+ {parameters.PARABOLA_C}"),
+     f"+ {parameters.PARABOLA_C}  (tangent angle varies along curve)"),
+    ("Corridor mode: chillicothe (line, Chillicothe↔Newark)",
+     f"fixed bearing {_CHILLICOTHE_BEARING:.1f}° from north"),
+    ("Corridor mode: high_banks (line, High Banks↔Newark)",
+     f"fixed bearing {_HIGH_BANKS_BEARING:.1f}° from north"),
     ("Corridor half-width (search dist.)", f"{parameters.CORRIDOR_HALF_WIDTH_M:,.0f} m ({parameters.CORRIDOR_HALF_WIDTH_M/1000:.1f} km)"),
 ]
 add_table(doc, ["Parameter", "Value"], param_rows)
@@ -436,9 +480,11 @@ for i, coord in enumerate(_sorted_coords, start=1):
     name = coord["name"]
     site_dir = OUTPUT_DIR / name
 
+    site_mode, site_angle = site_target_angle(coord)
     add_heading(doc, f"5.{i}  {name}", level=2)
     add_para(doc, (
         f"Location: {coord['lat']:.4f}° N, {coord['lon']:.4f}° W.  "
+        f"Corridor mode: {site_mode} (target bearing {site_angle:.1f}°).  "
         f"{coord.get('note', '')}"
     ))
 
@@ -489,7 +535,8 @@ for i, coord in enumerate(_sorted_coords, start=1):
         "angle deviation from target bearing.  "
         "Bottom row: initial binary mask (amplitude + orientation filter), "
         "along-wall gap-filled binary mask, medial-axis skeleton, labelled skeleton components, "
-        "detected parallel wall pairs, hillshade perpendicular to the 32 degree bearing (visual diagnostic).",
+        f"detected parallel wall pairs, hillshade perpendicular to this site's "
+        f"{site_angle:.0f}° target bearing (visual diagnostic).",
     )
 
 

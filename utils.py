@@ -205,6 +205,50 @@ def parabola_from_angle_at_newark(angle_deg):
     return a, b, c, x_offset
 
 
+def corridor_mode_and_angle(lat, lon):
+    """
+    Pick the named corridor segment that passes closest to (lat, lon) and
+    return its locally expected wall bearing there.
+
+    The Hopewell corridor isn't one straight line — range_searcher.py's area
+    scan already models it as three segments radiating south from Newark:
+    'circleville' (a parabola, since that leg curves), 'chillicothe' and
+    'high_banks' (straight lines, each with one fixed bearing along their
+    length). This evaluates the same three curves at a single point instead
+    of tiling along them, so a report site picks up the bearing a targeted
+    scan of its segment would have used to find it, rather than one
+    corridor-wide constant.
+
+    Returns
+    -------
+    (mode, angle_deg) : mode is 'circleville', 'chillicothe', or 'high_banks';
+    angle_deg is in the same convention as parameters.TARGET_ANGLE /
+    ROAD_BEARING_DEG (they're numerically identical: see tile_curve's
+    "90 - geo_road_angle" comment in range_searcher.py).
+    """
+    import parameters as _p
+
+    segments = {
+        "circleville": make_parabola(
+            _p.PARABOLA_A, _p.PARABOLA_B, _p.PARABOLA_C,
+            x_offset=_p.PARABOLA_X_OFFSET,
+        ),
+        "chillicothe": make_line(
+            _p.CHILLICOTHE_COORD[1], _p.CHILLICOTHE_COORD[0],
+            _p.NEWARK_COORD[1], _p.NEWARK_COORD[0],
+        ),
+        "high_banks": make_line(
+            _p.HIGH_BANKS_COORD[1], _p.HIGH_BANKS_COORD[0],
+            _p.NEWARK_COORD[1], _p.NEWARK_COORD[0],
+        ),
+    }
+
+    mode, (_curve_func, curve_deriv) = min(
+        segments.items(), key=lambda kv: abs(lat - kv[1][0](lon)),
+    )
+    return mode, corridor_angle_at(curve_deriv, lon)
+
+
 def annotate_lines_corridor(lines, curve_func, curve_deriv_fn, lat_m=111_320.0):
     """
     Annotate line dicts in-place with 'expected_angle' (°) and 'corridor_dist_m' (m).

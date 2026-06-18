@@ -115,6 +115,7 @@ def generate_pipeline_figure(coord: dict, dtm_path: str, output_dir: Path,
     ridge, valid_ridge = det["ridge"], det["valid_ridge"]
     binary, closed, skeleton, labeled = det["binary"], det["closed"], det["skeleton"], det["labeled"]
     pairs = det["pairs_clean"]
+    target_angle, mode = det["target_angle"], det["mode"]
     nd_mask = raw == nodata
 
     # ── Build figure  (2 rows × 7 columns) ───────────────────────────────────
@@ -123,15 +124,19 @@ def generate_pipeline_figure(coord: dict, dtm_path: str, output_dir: Path,
     fig.patch.set_facecolor("#1a1a1a")
     fig.suptitle(
         f"LiDAR Processing Pipeline  ·  {name.replace('_', ' ')}  "
-        f"({lat:.4f}°N, {lon:.4f}°E)",
+        f"({lat:.4f}°N, {lon:.4f}°E)  ·  target {target_angle:.1f}° ({mode})",
         fontsize=13, color="white", y=0.99,
     )
 
     hs_raw = render_hillshaded_dtm(raw, nodata=nodata, azimuth=315)
     hs_smooth = render_hillshaded_dtm(smoothed, nodata=nodata, azimuth=315)
     lrm_disp = np.where(lrm == nodata, np.nan, lrm)
-    # Intense hillshade perpendicular to 32° (azimuth 122°), low sun angle for maximum contrast
-    hs_perp32 = hillshade(smoothed, nodata=nodata, azimuth=122.0, altitude=20.0, z_factor=4.0)
+    # Intense hillshade perpendicular to this site's target bearing, low sun
+    # angle for maximum contrast. The bearing itself is mode-dependent (see
+    # base_compute.get_detection / utils.corridor_mode_and_angle) — circleville,
+    # chillicothe, and high_banks each imply a different expected wall angle.
+    perp_azimuth = (target_angle + 90.0) % 360.0
+    hs_perp32 = hillshade(smoothed, nodata=nodata, azimuth=perp_azimuth, altitude=20.0, z_factor=4.0)
 
     # Hessian orientation & angle-deviation maps (computed once, used in row 1 & 2)
     orient_rad = hessian_ridge_orientation(valid_ridge, sigma=parameters.HESSIAN_SIGMA)
@@ -139,7 +144,7 @@ def generate_pipeline_figure(coord: dict, dtm_path: str, output_dir: Path,
     ridge_present = valid_ridge > cfg.RIDGE_THRESHOLD * 0.05
     orient_disp = np.where(ridge_present, orient_deg, np.nan)
 
-    target_rad = np.deg2rad(cfg.TARGET_ANGLE)
+    target_rad = np.deg2rad(target_angle)
     diff_rad = np.abs(orient_rad - target_rad)
     diff_rad = np.minimum(diff_rad, np.pi - diff_rad)
     diff_disp = np.where(ridge_present, np.rad2deg(diff_rad), np.nan)
@@ -183,10 +188,10 @@ def generate_pipeline_figure(coord: dict, dtm_path: str, output_dir: Path,
 
     cb_ori = _cb(axes[0, 5], axes[0, 5].imshow(orient_disp, origin="upper", cmap="hsv",
                                                  vmin=0, vmax=180, extent=ext, aspect="auto"))
-    cb_ori.ax.axhline(cfg.TARGET_ANGLE, color="cyan", linewidth=1.2, linestyle="--")
-    cb_ori.ax.annotate(f"{cfg.TARGET_ANGLE:.0f}°", xy=(1.05, cfg.TARGET_ANGLE),
+    cb_ori.ax.axhline(target_angle, color="cyan", linewidth=1.2, linestyle="--")
+    cb_ori.ax.annotate(f"{target_angle:.0f}°", xy=(1.05, target_angle),
                        xycoords=("axes fraction", "data"), fontsize=5, color="cyan", va="center")
-    style_axes(axes[0, 5], f"6. Hessian Orientation  (target {cfg.TARGET_ANGLE:.0f}°)")
+    style_axes(axes[0, 5], f"6. Hessian Orientation  (target {target_angle:.0f}°, {mode})")
     axes[0, 5].set_xticks([]); axes[0, 5].set_yticks([])
 
     cb_diff = _cb(axes[0, 6], axes[0, 6].imshow(diff_disp, origin="upper", cmap="RdYlGn_r",
@@ -254,7 +259,7 @@ def generate_pipeline_figure(coord: dict, dtm_path: str, output_dir: Path,
     # Panel 13. — visual diagnostic hillshade next to detected pairs
     axes[1, 5].imshow(hs_perp32, origin="upper", cmap="gray", extent=ext, aspect="auto",
                       vmin=0, vmax=1)
-    style_axes(axes[1, 5], "13. Hillshade ⊥ 32°  (az 122°, alt 20°)")
+    style_axes(axes[1, 5], f"13. Hillshade ⊥ {target_angle:.0f}°  (az {perp_azimuth:.0f}°, alt 20°)")
     axes[1, 5].set_xticks([]); axes[1, 5].set_yticks([])
 
     axes[1, 6].set_visible(False)

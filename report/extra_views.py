@@ -40,7 +40,8 @@ from road_model.process_dtm import multiscale_ridge_enhancement
 from .base_compute import get_terrain, get_detection
 from .report_utils import (hillshade, render_hillshaded_dtm, save_figure, style_axes,
                             pair_to_geo, sample_profile, pair_style,
-                            confirmed_pair_indices, confirmed_pairs_label)
+                            confirmed_pair_indices, confirmed_pairs_label,
+                            site_target_angle)
 from . import config as cfg
 
 
@@ -233,8 +234,8 @@ def _elevation_statistics(raw: np.ndarray, nodata: float,
 def _road_elevation_profile(smoothed: np.ndarray, extent: list, nodata: float,
                               lat: float, lon: float,
                               name: str, output_dir: Path,
+                              bearing: float = cfg.ROAD_BEARING_DEG,
                               n_samples: int = 400) -> None:
-    bearing = cfg.ROAD_BEARING_DEG
     road_east  = np.sin(np.radians(bearing))
     road_north = np.cos(np.radians(bearing))
 
@@ -584,6 +585,10 @@ def generate_extra_views(coord: dict, dtm_path: str, output_dir: Path,
     det = get_detection(coord, dtm_path, terrain, output_dir, use_cache=use_cache)
     pairs = det["pairs_clean"]
     true_idx = coord.get("true_positive_pair_index")
+    mode, bearing = det.get("mode"), det.get("target_angle")
+    if bearing is None:
+        mode, bearing = site_target_angle(coord)
+    print(f"  [extra_views] target bearing {bearing:.1f}°  (mode={mode})")
 
     print(f"  [extra_views] multi-azimuth hillshade …")
     _multi_azimuth_hillshade(raw, extent, nodata, name, output_dir)
@@ -598,7 +603,7 @@ def generate_extra_views(coord: dict, dtm_path: str, output_dir: Path,
     _elevation_statistics(raw, nodata, name, output_dir)
 
     print(f"  [extra_views] along-road profile …")
-    _road_elevation_profile(smoothed, extent, nodata, lat, lon, name, output_dir)
+    _road_elevation_profile(smoothed, extent, nodata, lat, lon, name, output_dir, bearing=bearing)
 
     print(f"  [extra_views] detected-pair cross sections …")
     confirmed = sorted(confirmed_pair_indices(true_idx))

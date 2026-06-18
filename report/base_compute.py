@@ -21,6 +21,7 @@ from road_model.process_dtm import (
 from road_model.ridge_detection import detect_parallel_walls_ridge_pairing, remove_invalid_pairs
 from . import cache as _cache
 from . import config as cfg
+from .report_utils import site_target_angle
 
 
 def _cache_dir(coord: dict, output_dir: Path) -> Path:
@@ -35,8 +36,9 @@ def _terrain_key(coord: dict, dtm_path: str) -> tuple:
 
 
 def _detection_key(coord: dict, dtm_path: str) -> tuple:
+    _, target_angle = site_target_angle(coord)
     return _terrain_key(coord, dtm_path) + (
-        tuple(cfg.RIDGE_SCALES), cfg.TARGET_ANGLE, cfg.SPACING_METERS,
+        tuple(cfg.RIDGE_SCALES), target_angle, cfg.SPACING_METERS,
         cfg.ANGLE_TOLERANCE, cfg.SPACING_TOLERANCE, cfg.RIDGE_THRESHOLD,
         cfg.MIN_RIDGE_LENGTH_METERS, cfg.OVERLAP_RATIO,
     )
@@ -78,12 +80,13 @@ def get_detection(coord: dict, dtm_path: str, terrain: dict, output_dir: Path,
     one or the other, so both are kept available.
     """
     def _compute():
+        mode, target_angle = site_target_angle(coord)
         ridge = multiscale_ridge_enhancement(terrain["lrm"], scales=cfg.RIDGE_SCALES,
                                               nodata=terrain["nodata"])
         valid_ridge = np.where(terrain["raw"] == terrain["nodata"], 0.0, ridge.astype(float))
         pairs, debug = detect_parallel_walls_ridge_pairing(
             ridge_map=valid_ridge,
-            target_angle=cfg.TARGET_ANGLE,
+            target_angle=target_angle,
             extent=terrain["extent"],
             spacing_meters=cfg.SPACING_METERS,
             angle_tolerance=cfg.ANGLE_TOLERANCE,
@@ -95,11 +98,12 @@ def get_detection(coord: dict, dtm_path: str, terrain: dict, output_dir: Path,
         )
         binary, closed, skeleton, labeled, _ = debug
         pairs_clean = remove_invalid_pairs(pairs, angle_tolerance=cfg.ANGLE_TOLERANCE,
-                                            target_angle=cfg.TARGET_ANGLE)
+                                            target_angle=target_angle)
         return {
             "ridge": ridge, "valid_ridge": valid_ridge,
             "pairs": pairs, "pairs_clean": pairs_clean,
             "binary": binary, "closed": closed, "skeleton": skeleton, "labeled": labeled,
+            "mode": mode, "target_angle": target_angle,
         }
 
     return _cache.cached(

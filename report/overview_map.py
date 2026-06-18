@@ -19,7 +19,7 @@ import matplotlib.pyplot as plt
 import matplotlib.lines as mlines
 
 from .base_compute import get_terrain, get_detection
-from .report_utils import save_figure
+from .report_utils import save_figure, site_target_angle
 from . import config as cfg
 import parameters
 
@@ -38,8 +38,9 @@ _HALF_LINE_M = 5_000
 
 def _run_detection(coord: dict, dtm_path: str, output_dir: Path,
                     use_cache: bool = True) -> dict:
-    fallback = cfg.ROAD_BEARING_DEG % 180
-    base     = {**coord, "bearing": fallback, "detected": False,
+    mode, fallback = site_target_angle(coord)
+    fallback = fallback % 180
+    base     = {**coord, "bearing": fallback, "mode": mode, "detected": False,
                 "raw": None, "lrm": None, "extent": None,
                 "nodata": parameters.NODATA, "pairs": []}
     try:
@@ -52,6 +53,7 @@ def _run_detection(coord: dict, dtm_path: str, output_dir: Path,
 
         det = get_detection(coord, dtm_path, terrain, output_dir, use_cache=use_cache)
         pairs = det["pairs_clean"]
+        mode  = det.get("mode", mode)
 
         bearing  = fallback
         detected = False
@@ -60,7 +62,7 @@ def _run_detection(coord: dict, dtm_path: str, output_dir: Path,
             (x0, y0), (x1, y1) = pairs[0]["line1"]
             bearing = np.degrees(np.arctan2(x1 - x0, -(y1 - y0))) % 180
 
-        return {**coord, "bearing": bearing, "detected": detected,
+        return {**coord, "bearing": bearing, "mode": mode, "detected": detected,
                 "raw": raw, "lrm": lrm, "extent": extent, "nodata": nodata, "pairs": pairs}
 
     except Exception as exc:
@@ -209,8 +211,10 @@ def _draw_corridor_map(ax: plt.Axes, sites: list[dict],
 def _save_site_figure(focus: dict, all_sites: list[dict], output_dir: Path) -> None:
     name    = focus["name"]
     bearing = focus["bearing"]
+    mode    = focus["mode"]
     detected = focus["detected"]
-    status  = f"detected {bearing:.1f}°" if detected else f"fallback {bearing:.1f}°"
+    status  = (f"detected {bearing:.1f}°" if detected
+               else f"fallback {bearing:.1f}° ({mode})")
 
     fig, ax = plt.subplots(figsize=(11, 9), facecolor="#1a1a1a")
     ax.set_facecolor("#0d1117")
@@ -225,7 +229,7 @@ def _save_site_figure(focus: dict, all_sites: list[dict], output_dir: Path) -> N
     legend_handles = [
         mlines.Line2D([], [], color="#f0c040", linewidth=2.5, label="Detected bearing"),
         mlines.Line2D([], [], color="#ff7060", linewidth=2.5,
-                      label=f"Fallback ({cfg.ROAD_BEARING_DEG:.0f}°)"),
+                      label="Fallback (corridor mode bearing)"),
         mlines.Line2D([], [], color="#888888", linewidth=1.2, alpha=0.5,
                       label="Other sites"),
         mlines.Line2D([], [], color="#5b9bd5", linewidth=0,
@@ -251,7 +255,7 @@ def generate_overview_map(coords: list[dict], dtm_path: str, output_dir: Path,
     sites: list[dict] = []
     for coord in coords:
         s = _run_detection(coord, dtm_path, output_dir, use_cache=use_cache)
-        tag = "detected" if s["detected"] else f"fallback {cfg.ROAD_BEARING_DEG:.0f}°"
+        tag = "detected" if s["detected"] else f"fallback ({s['mode']})"
         print(f"    {s['name']}: {s['bearing']:.1f}°  ({tag})")
         sites.append(s)
 
@@ -271,7 +275,7 @@ def generate_overview_map(coords: list[dict], dtm_path: str, output_dir: Path,
     legend_handles = [
         mlines.Line2D([], [], color="#f0c040", linewidth=2.5, label="Detected bearing"),
         mlines.Line2D([], [], color="#ff7060", linewidth=2.5,
-                      label=f"Fallback ({cfg.ROAD_BEARING_DEG:.0f}°)"),
+                      label="Fallback (corridor mode bearing)"),
         mlines.Line2D([], [], color="#5b9bd5", linewidth=0,
                       marker="D", markersize=7, label="City"),
         mlines.Line2D([], [], color="#a0c8e0", linewidth=1.5,

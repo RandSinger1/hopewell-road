@@ -11,6 +11,28 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy.ndimage import map_coordinates
 
+from utils import corridor_mode_and_angle
+
+
+# ─── Target angle resolution ──────────────────────────────────────────────────
+
+def site_target_angle(coord: dict) -> tuple:
+    """
+    Resolve the expected wall bearing for one REPORT_COORDS site.
+
+    By default this is derived from whichever named corridor segment
+    (circleville parabola, chillicothe line, high_banks line) passes
+    closest to the site — see utils.corridor_mode_and_angle. Set
+    "target_angle" in the REPORT_COORDS entry to override with a fixed
+    value (mode is reported as "manual" in that case).
+
+    Returns (mode, angle_deg).
+    """
+    override = coord.get("target_angle")
+    if override is not None:
+        return "manual", override
+    return corridor_mode_and_angle(coord["lat"], coord["lon"])
+
 
 # ─── Figure helpers ───────────────────────────────────────────────────────────
 
