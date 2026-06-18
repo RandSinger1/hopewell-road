@@ -18,7 +18,8 @@ from flask import Flask, jsonify, render_template, request, send_file
 
 import parameters
 from utils import (make_parabola, make_line, sample_corridor,
-                   annotate_lines_corridor, perp_spacing_at_overlap)
+                   annotate_lines_corridor, perp_spacing_at_overlap,
+                   corridor_angle_at)
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
@@ -137,6 +138,54 @@ def get_corridor():
         "geometry": {"type": "Polygon", "coordinates": [ring]},
         "properties": {"mode": state["corridor_mode"]},
     })
+
+
+@app.route("/api/expected_angle")
+def get_expected_angle():
+    """Expected wall angle (degrees) at a given longitude, plus the expected
+    wall-to-wall spacing — used to draw a screen-centred target overlay.
+    When a corridor (straight line or parabola) is active the angle follows
+    the curve's local derivative; otherwise it falls back to the static
+    TARGET_ANGLE used by the detector."""
+    try:
+        lon = float(request.args.get("lon"))
+    except (TypeError, ValueError):
+        return jsonify({"error": "lon required"}), 400
+
+    fns = _get_corridor_fns()
+    if fns is not None:
+        _curve_func, curve_deriv = fns[0], fns[1]
+        angle = corridor_angle_at(curve_deriv, lon)
+    else:
+        angle = parameters.TARGET_ANGLE
+
+    return jsonify({"angle": angle, "spacing_m": parameters.SPACING_METERS})
+
+
+@app.route("/api/elevation")
+def get_elevation():
+    """DTM elevation (metres) at a single WGS84 point, used for the
+    cursor-elevation readout."""
+    _ensure_dtm()
+    if state["dtm_bounds"] is None:
+        return jsonify({"elevation": None})
+    try:
+        lon = float(request.args.get("lon"))
+        lat = float(request.args.get("lat"))
+    except (TypeError, ValueError):
+        return jsonify({"error": "lon/lat required"}), 400
+
+    b = state["dtm_bounds"]
+    if not (b["west"] <= lon <= b["east"] and b["south"] <= lat <= b["north"]):
+        return jsonify({"elevation": None})
+
+    try:
+        from .dtm_renderer import read_point_elevation
+        elev = read_point_elevation(state["dtm_path"], lon, lat)
+        return jsonify({"elevation": elev})
+    except Exception as ex:
+        log.error("elevation: %s", ex)
+        return jsonify({"elevation": None})
 
 
 @app.route("/api/prewarm_priority", methods=["POST"])

@@ -255,6 +255,56 @@ def _read_elev_range(path: str) -> tuple[float, float]:
     return float(lo), float(hi)
 
 
+def read_point_elevation(path: str, lon: float, lat: float):
+    """Return the DTM elevation (metres) at a single WGS84 point, or None if
+    the point falls outside the DTM extent or on a nodata cell."""
+    eps = 1e-5   # tiny warp window centred on the point (~1 m at these latitudes)
+    if _HAS_GDAL:
+        opts = gdal.WarpOptions(
+            format='MEM',
+            dstSRS='EPSG:4326',
+            outputBounds=[lon - eps, lat - eps, lon + eps, lat + eps],
+            width=1,
+            height=1,
+            resampleAlg=gdal.GRA_Bilinear,
+            dstNodata=-9999.0,
+            # The DTM has a sparse-data .ovr pyramid built for fast tile
+            # rendering (build_overviews, AVERAGE resampling); at this
+            # decimation, narrow valid-data strips can decimate to nodata at
+            # a point that's valid at full resolution. Force full-res reads.
+            overviewLevel='NONE',
+        )
+        mem_ds = gdal.Warp('', path, options=opts)
+        if mem_ds is None:
+            return None
+        val = float(mem_ds.GetRasterBand(1).ReadAsArray()[0, 0])
+        mem_ds = None
+    elif _HAS_RASTERIO:
+        from rasterio.warp import reproject, Resampling
+        from rasterio.transform import from_bounds
+        from rasterio.crs import CRS
+        dst_transform = from_bounds(lon - eps, lat - eps, lon + eps, lat + eps, 1, 1)
+        dst = np.full((1, 1), np.nan, dtype=np.float64)
+        with rasterio.open(path) as src:
+            reproject(
+                source=rasterio.band(src, 1),
+                destination=dst,
+                src_transform=src.transform,
+                src_crs=src.crs,
+                dst_transform=dst_transform,
+                dst_crs=CRS.from_epsg(4326),
+                resampling=Resampling.bilinear,
+                dst_nodata=np.nan,
+            )
+        val = float(dst[0, 0])
+    else:
+        raise RuntimeError("Neither GDAL nor rasterio is installed.")
+
+    if not math.isfinite(val) or val <= -9000.0:
+        return None
+    return val
+
+
 def read_region_elev_range(path: str, west: float, south: float,
                             east: float, north: float) -> tuple[float, float]:
     """

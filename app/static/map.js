@@ -19,11 +19,20 @@ let dtmOverlay    = null;
 let linesLayer    = null;
 let refLayer      = null;
 let corridorLayer = null;
+let targetLayer   = null;
 let loadDebounce  = null;
 let statsDebounce = null;
 let dtmLo         = null;
 let dtmHi         = null;
 let _rawGeojson   = null;   // cached full server response, filtered client-side
+
+// Target-lines overlay (screen-centred wall template)
+let targetOn         = false;
+let targetDebounce    = null;
+const TARGET_LENGTH_M = 50;
+
+// Cursor elevation
+let cursorElevDebounce = null;
 
 // ---------------------------------------------------------------------------
 // Initialise
@@ -52,8 +61,9 @@ function _initMap() {
     opacity: 0.55,
   }).addTo(map);
 
-  linesLayer = L.layerGroup().addTo(map);
-  refLayer   = L.layerGroup().addTo(map);
+  linesLayer  = L.layerGroup().addTo(map);
+  refLayer    = L.layerGroup().addTo(map);
+  targetLayer = L.layerGroup();   // not added to map until toggled on
 
   _addMapControls();
   _addKeyboardShortcuts();
@@ -61,6 +71,9 @@ function _initMap() {
   map.on("zoomend moveend", _scheduleLineLoad);
   map.on("zoomend moveend", _updateInfoPanel);
   map.on("zoomend moveend", _scheduleDtmStats);
+  map.on("zoomend moveend", _scheduleTargetLines);
+  map.on("mousemove", _onMapMouseMove);
+  map.on("mouseout", _onMapMouseOut);
   _updateInfoPanel();
 }
 
@@ -399,6 +412,78 @@ function toggleCorridor(show) {
 }
 
 // ---------------------------------------------------------------------------
+// Target-lines overlay — a screen-centred template of the two expected wall
+// lines (TARGET_LENGTH_M long, SPACING_METERS apart, oriented at the
+// corridor's expected angle at the current view centre, or the static
+// TARGET_ANGLE when no corridor is active).
+// ---------------------------------------------------------------------------
+
+/**
+ * Compute the two parallel template-wall segments centred at [centerLat,
+ * centerLon]. `angleDeg` uses the codebase-wide convention (degrees CCW
+ * from +x / east, mod 180 — see utils.corridor_angle_at). Degree offsets
+ * are scaled by the same flat-earth metres-per-degree approximations used
+ * throughout the app (_ptSegDistM, _pair_spacing_m) so the drawn lines are
+ * accurate in real-world metres rather than raw degree-space.
+ */
+function _targetLineSegments(centerLat, centerLon, angleDeg, spacingM, lengthM) {
+  const LON_M = 85000, LAT_M = 111320;
+  const slope   = Math.tan((90 - angleDeg) * Math.PI / 180);   // dlat/dlon
+  const bearing = Math.atan2(slope * LAT_M, LON_M);            // true ground bearing
+  const ux = Math.cos(bearing), uy = Math.sin(bearing);        // unit dir along wall (metres)
+  const px = -uy, py = ux;                                     // unit perpendicular (metres)
+
+  const half = lengthM / 2;
+  const halfSpacing = spacingM / 2;
+  const toLatLng = (mx, my) => [centerLat + my / LAT_M, centerLon + mx / LON_M];
+
+  return [-1, 1].map(side => {
+    const ox = px * halfSpacing * side;
+    const oy = py * halfSpacing * side;
+    return [
+      toLatLng(ux * half + ox, uy * half + oy),
+      toLatLng(-ux * half + ox, -uy * half + oy),
+    ];
+  });
+}
+
+function _scheduleTargetLines() {
+  if (!targetOn) return;
+  clearTimeout(targetDebounce);
+  targetDebounce = setTimeout(_updateTargetLines, 200);
+}
+
+function _updateTargetLines() {
+  if (!targetOn || !map) return;
+  const c = map.getCenter();
+  fetch(`/api/expected_angle?lon=${c.lng}`)
+    .then(r => r.json())
+    .then(({ angle, spacing_m }) => {
+      if (!targetOn) return;   // toggled off while the request was in flight
+      targetLayer.clearLayers();
+      const segs = _targetLineSegments(c.lat, c.lng, angle, spacing_m, TARGET_LENGTH_M);
+      segs.forEach(([a, b]) => {
+        L.polyline([a, b], { color: "#33ff99", weight: 2.5, opacity: 0.9 }).addTo(targetLayer);
+      });
+    })
+    .catch(console.error);
+}
+
+function toggleTargetLines(show) {
+  targetOn = show;
+  const chk = document.getElementById("chk-target");
+  if (chk) chk.checked = show;
+  if (show) {
+    targetLayer.addTo(map);
+    _updateTargetLines();
+  } else {
+    targetLayer.clearLayers();
+    map.removeLayer(targetLayer);
+  }
+  _syncTargetBtn();
+}
+
+// ---------------------------------------------------------------------------
 // Client-side line filters (angle deviation, corridor distance, wall spacing)
 // ---------------------------------------------------------------------------
 
@@ -614,6 +699,28 @@ function _updateInfoPanel() {
     `${c.lat.toFixed(7)}, ${c.lng.toFixed(7)}`;
 }
 
+function _onMapMouseMove(e) {
+  clearTimeout(cursorElevDebounce);
+  cursorElevDebounce = setTimeout(() => _fetchCursorElevation(e.latlng), 80);
+}
+
+function _onMapMouseOut() {
+  clearTimeout(cursorElevDebounce);
+  const el = document.getElementById("info-cursor-elev");
+  if (el) el.textContent = "—";
+}
+
+function _fetchCursorElevation(latlng) {
+  fetch(`/api/elevation?lon=${latlng.lng}&lat=${latlng.lat}`)
+    .then(r => r.json())
+    .then(d => {
+      const el = document.getElementById("info-cursor-elev");
+      if (!el) return;
+      el.textContent = d.elevation != null ? `${d.elevation.toFixed(1)} m` : "—";
+    })
+    .catch(() => {});
+}
+
 function copyCenter() {
   const text = document.getElementById("info-center").textContent;
   if (!text || text === "—") return;
@@ -650,12 +757,34 @@ function _addMapControls() {
   });
 
   new LinesToggleControl().addTo(map);
+
+  const TargetToggleControl = L.Control.extend({
+    options: { position: "topright" },
+    onAdd() {
+      const btn = L.DomUtil.create("button", "map-toggle-btn");
+      btn.id    = "map-target-btn";
+      btn.title = "Toggle target lines  [T]";
+      btn.innerHTML = "Target";
+      btn.setAttribute("data-active", "false");
+
+      L.DomEvent.on(btn, "click", L.DomEvent.stopPropagation);
+      L.DomEvent.on(btn, "click", () => toggleTargetLines(!targetOn));
+      return btn;
+    },
+  });
+
+  new TargetToggleControl().addTo(map);
 }
 
 function _syncToggleBtn() {
   const btn    = document.getElementById("map-lines-btn");
   const active = document.getElementById("chk-lines").checked;
   if (btn) btn.setAttribute("data-active", active ? "true" : "false");
+}
+
+function _syncTargetBtn() {
+  const btn = document.getElementById("map-target-btn");
+  if (btn) btn.setAttribute("data-active", targetOn ? "true" : "false");
 }
 
 // ---------------------------------------------------------------------------
@@ -681,6 +810,9 @@ function _addKeyboardShortcuts() {
       const chk = document.getElementById("chk-dtm");
       chk.checked = !chk.checked;
       toggleDtm(chk.checked);
+    }
+    if (e.key === "t" || e.key === "T") {
+      toggleTargetLines(!targetOn);
     }
   });
 }

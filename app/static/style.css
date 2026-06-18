@@ -207,6 +207,7 @@ select option { background: var(--input-bg); }
 .legend-line.newark-circleville { border-top-color: #ffcc00; }
 .legend-line.newark-highbanks { border-top-color: #cc66ff; }
 .legend-line.corridor         { border-top-color: #ccaa22; }
+.legend-line.target           { border-top-color: #33ff99; border-top-style: solid; }
 
 /* ── Line filter sliders ───────────────────────────────────────── */
 .filter-row {

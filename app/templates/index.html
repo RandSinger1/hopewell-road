@@ -75,6 +75,11 @@
         <input type="checkbox" id="chk-hide-roads" onchange="_scheduleLineLoad()" />
         <span>Hide roads</span>
       </label>
+
+      <label class="toggle-row">
+        <input type="checkbox" id="chk-target" onchange="toggleTargetLines(this.checked)" />
+        <span>Target lines (50 m)  [T]</span>
+      </label>
     </div>
 
     <div class="section" id="section-filters">
@@ -123,6 +128,7 @@
         <span id="info-center">—</span>
         <button class="copy-btn" onclick="copyCenter()" title="Copy coordinates">⎘</button>
       </div>
+      <div class="info-row"><span class="dim">Cursor elevation</span><span id="info-cursor-elev">—</span></div>
     </div>
 
     <div class="section" id="section-sites">
@@ -169,6 +175,10 @@
       <div class="legend-row">
         <span class="legend-line corridor"></span>
         <span>Corridor boundary</span>
+      </div>
+      <div class="legend-row">
+        <span class="legend-line target"></span>
+        <span>Target lines (50 m template)</span>
       </div>
     </div>
 
