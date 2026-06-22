@@ -188,15 +188,50 @@ _CITIES = {
     'High Banks':  HIGH_BANKS,
 }
 
-def preview_tiles(tiles, mode, size_x, size_y):
-    """Show a map of tiles and named cities before the search runs."""
+def preview_tiles(tiles, mode, size_x, size_y, dtm_path=None, dtm_px=400):
+    """
+    Show a map of tiles and named cities before the search runs, overlaid on
+    a sparse readback of the actual DTM so the search range is shown against
+    where data really exists — rather than against an assumed/hand-
+    maintained boundary, which can drift out of sync with what was actually
+    downloaded and merged.
+
+    The DTM read is windowed to the tiles' own bounding box (not the whole
+    file): this project's merged_dtm.tif files can have a corrupted overview
+    pyramid (every level 100% nodata — see lidar.quick_view.read_dtm_window),
+    so the background is warped directly from full-resolution data with
+    overviews bypassed; doing that for the whole multi-GB file would be far
+    too slow for an interactive preview, but a windowed read is fast.
+    """
     size_x_deg, size_y_deg = convert_meters_degrees_pixels(METERS, DEGREES, size_x, size_y)
 
     fig, ax = plt.subplots(figsize=(11, 9))
 
-    # Tile footprints — rectangles for small counts, scatter for large
     lats = [coord[0] for coord, _ in tiles]
     lons = [coord[1] for coord, _ in tiles]
+
+    if dtm_path is None:
+        dtm_path = parameters.SCAN_DTM_PATH
+    if lats and dtm_path and Path(dtm_path).exists():
+        from lidar.quick_view import read_dtm_window
+        margin = 0.1 * max(max(lons) - min(lons) + size_x_deg,
+                           max(lats) - min(lats) + size_y_deg)
+        bounds = (
+            min(lons) - margin, min(lats) - margin,
+            max(lons) + size_x_deg + margin, max(lats) + size_y_deg + margin,
+        )
+        print("Loading DTM preview for the search-range window …")
+        dtm_data, dtm_extent = read_dtm_window(dtm_path, bounds, width=dtm_px, height=dtm_px)
+        if dtm_data is not None:
+            # Masked (nodata) cells render transparent, so areas the DTM
+            # doesn't actually cover show through as blank rather than
+            # implying coverage.
+            ax.imshow(dtm_data, extent=dtm_extent, cmap='gray', aspect='auto',
+                      alpha=0.7, zorder=0)
+    elif dtm_path and not Path(dtm_path).exists():
+        print(f"  [preview] DTM not found at {dtm_path!r} — skipping background.")
+
+    # Tile footprints — rectangles for small counts, scatter for large
 
     if len(tiles) <= 600:
         for (lat, lon), _ in tiles:
@@ -255,6 +290,7 @@ def preview_tiles(tiles, mode, size_x, size_y):
     )
     ax.set_aspect('equal', adjustable='datalim')
     ax.grid(True, alpha=0.3)
+    ax.legend(loc='best', fontsize=9)
     plt.tight_layout()
     plt.show()
 
@@ -299,7 +335,7 @@ def main(mode, max_workers, size_x, size_y, overlap, half_width_meters, preview=
         tiles = tiles[::-1]
 
     if preview:
-        preview_tiles(tiles, mode, size_x, size_y)
+        preview_tiles(tiles, mode, size_x, size_y, dtm_path=filepath)
 
     output_dir = Path('data/locations') / f'{mode}_{size_x}_{size_y}'
     run_tiles(tiles, filepath, size_x, size_y, output_dir, max_workers)

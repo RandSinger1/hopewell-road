@@ -15,9 +15,76 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import parameters
 
-def quick_view_dtm(input_path, sample_step=10, cmap='viridis', figsize=(12, 8), outpath=None, workers=1, show_cities=True):
+def read_dtm_window(input_path, bounds, width=400, height=400,
+                     resample='nearest', verbose=True):
     """
-    Display a low‑resolution version of a DTM with coordinate axes.
+    Warp a bounded region of a DTM straight from full-resolution data into a
+    small in-memory raster, bypassing any overview pyramid (overviewLevel=
+    'NONE'). Use this instead of read_dtm_lowres() when only a sub-region is
+    needed (e.g. a scan preview) — it's far cheaper than a whole-file
+    decimated read, and it sidesteps a real failure mode observed on this
+    project's merged_dtm.tif files: a thin/sparse data corridor inside a
+    much larger nodata bounding box can cause the external .ovr overview
+    pyramid to come out 100% nodata at every level (silently, with no
+    error), which makes any decimated read that uses overviews — including
+    plain GDAL ReadAsArray decimation — return an all-blank image even
+    though the base raster has real data.
+
+    Parameters
+    ----------
+    input_path : str
+    bounds : (xmin, ymin, xmax, ymax)
+        Window to read, in the raster's CRS (lon/lat for a WGS84-warped DTM).
+    width, height : int
+        Output pixel grid size.
+    resample : 'nearest' or 'average'
+        'nearest' is much faster (no need to touch every source pixel in the
+        window) and is the better default for a quick preview; 'average' is
+        more representative but reads every contributing full-resolution
+        pixel, which is slow on a large window for an uncompressed-overview
+        file like this one.
+    verbose : bool
+
+    Returns
+    -------
+    data : np.ma.MaskedArray (2D, float32) or None if the warp failed.
+    extent : list [xmin, xmax, ymin, ymax], or None.
+    """
+    xmin, ymin, xmax, ymax = bounds
+    ds = gdal.Open(input_path)
+    if ds is None:
+        raise RuntimeError(f"Could not open {input_path}")
+    nodata = ds.GetRasterBand(1).GetNoDataValue()
+    if nodata is None:
+        nodata = -9999.0
+    ds = None
+
+    if verbose:
+        print(f"  Warping window {tuple(round(b, 4) for b in bounds)} "
+              f"-> {width}x{height} px (resample={resample}, overviews bypassed) …")
+
+    opts = gdal.WarpOptions(
+        format='MEM', dstSRS='EPSG:4326',
+        outputBounds=[xmin, ymin, xmax, ymax],
+        width=width, height=height,
+        resampleAlg=gdal.GRA_NearestNeighbour if resample == 'nearest' else gdal.GRA_Average,
+        dstNodata=nodata,
+        overviewLevel='NONE',
+    )
+    mem_ds = gdal.Warp('', input_path, options=opts)
+    if mem_ds is None:
+        return None, None
+    data = mem_ds.GetRasterBand(1).ReadAsArray().astype(np.float32)
+    mem_ds = None
+
+    data = np.ma.masked_equal(data, np.float32(nodata))
+    extent = [xmin, xmax, ymin, ymax]
+    return data, extent
+
+
+def read_dtm_lowres(input_path, sample_step=10, workers=1, verbose=True):
+    """
+    Read a large DTM (GeoTIFF) at low resolution.
 
     Parameters
     ----------
@@ -25,33 +92,45 @@ def quick_view_dtm(input_path, sample_step=10, cmap='viridis', figsize=(12, 8), 
         Path to the GeoTIFF file.
     sample_step : int
         Read every Nth pixel (both x and y) to reduce resolution.
-    cmap : str
-        Matplotlib colormap name (e.g., 'viridis', 'terrain', 'jet').
-    figsize : tuple
-        Figure size in inches.
+    workers : int
+        Parallel threads for reading (split into horizontal strips).
+    verbose : bool
+        Print progress/diagnostics.
+
+    Returns
+    -------
+    data : np.ma.MaskedArray (2D, float32)
+        Downsampled elevation array, nodata cells masked.
+    extent : list [xmin, xmax, ymin, ymax]
+        Geographic extent in the raster's native CRS units, matching the
+        imshow(extent=...) convention used throughout this codebase.
     """
-    print(f"[1] Opening: {input_path}")
+    def _p(msg):
+        if verbose:
+            print(msg)
+
+    _p(f"[1] Opening: {input_path}")
     ds = gdal.Open(input_path)
     if ds is None:
         raise RuntimeError(f"Could not open {input_path}")
-    print(f"[1] OK — driver: {ds.GetDriver().ShortName}")
+    _p(f"[1] OK — driver: {ds.GetDriver().ShortName}")
 
     band = ds.GetRasterBand(1)
     full_xsize = ds.RasterXSize
     full_ysize = ds.RasterYSize
-    print(f"[2] Full size: {full_xsize} x {full_ysize}")
-    print(f"[2] Geotransform: {ds.GetGeoTransform()}")
-    print(f"[2] CRS: {ds.GetProjection()[:80]}...")
+    _p(f"[2] Full size: {full_xsize} x {full_ysize}")
+    _p(f"[2] Geotransform: {ds.GetGeoTransform()}")
+    _p(f"[2] CRS: {ds.GetProjection()[:80]}...")
 
     # Dimensions of the downsampled array
     buf_xsize = (full_xsize + sample_step - 1) // sample_step
     buf_ysize = (full_ysize + sample_step - 1) // sample_step
-    print(f"[3] Downsampled size: {buf_xsize} x {buf_ysize}  (step={sample_step})")
+    _p(f"[3] Downsampled size: {buf_xsize} x {buf_ysize}  (step={sample_step})")
 
     # Read using positional arguments: (xoff, yoff, xsize, ysize, buf_xsize, buf_ysize)
     # workers > 1: split into horizontal strips, each opened by its own GDAL handle
     # and decompress tiles in parallel via GDAL_NUM_THREADS.
-    print(f"[4] Reading array (workers={workers}, this may take a moment)…")
+    _p(f"[4] Reading array (workers={workers}, this may take a moment)…")
     gdal.SetConfigOption('GDAL_NUM_THREADS', str(workers))
 
     if workers > 1:
@@ -71,7 +150,7 @@ def quick_view_dtm(input_path, sample_step=10, cmap='viridis', figsize=(12, 8), 
                 0, y_off, full_xsize, y_size, buf_xsize, buf_y)
             ds_loc = None
             completed[0] += 1
-            print(f"[4] strip {completed[0]}/{n_strips} done", flush=True)
+            _p(f"[4] strip {completed[0]}/{n_strips} done")
             return arr
 
         with ThreadPoolExecutor(max_workers=workers) as ex:
@@ -85,26 +164,25 @@ def quick_view_dtm(input_path, sample_step=10, cmap='viridis', figsize=(12, 8), 
         data = band.ReadAsArray(0, 0, full_xsize, full_ysize, buf_xsize, buf_ysize)
 
     gdal.SetConfigOption('GDAL_NUM_THREADS', None)
-    print(f"[4] Read complete — dtype: {data.dtype}, shape: {data.shape}")
-    print(f"[4] Raw min: {data.min():.2f}  max: {data.max():.2f}  mean: {data.mean():.2f}")
+    _p(f"[4] Read complete — dtype: {data.dtype}, shape: {data.shape}")
+    _p(f"[4] Raw min: {data.min():.2f}  max: {data.max():.2f}  mean: {data.mean():.2f}")
 
     # Optional: mask NoData values (if any)
     nodata = band.GetNoDataValue()
-    print(f"[5] Nodata value: {nodata}")
+    _p(f"[5] Nodata value: {nodata}")
+    data = data.astype(np.float32)
     if nodata is not None:
-        data = data.astype(np.float32)
         nodata_f32 = np.float32(nodata)
         n_nodata = np.sum(data == nodata_f32)
         n_valid  = data.size - n_nodata
-        print(f"[5] Nodata pixels: {n_nodata} / {data.size}  ({100*n_nodata/data.size:.1f}%)")
-        print(f"[5] Valid pixels:  {n_valid}")
+        _p(f"[5] Nodata pixels: {n_nodata} / {data.size}  ({100*n_nodata/data.size:.1f}%)")
+        _p(f"[5] Valid pixels:  {n_valid}")
         data = np.ma.masked_equal(data, nodata_f32)
         if data.count() == 0:
-            print("[5] WARNING: all pixels masked after nodata removal!")
+            _p("[5] WARNING: all pixels masked after nodata removal!")
         else:
-            print(f"[5] Valid range: {data.min():.2f} – {data.max():.2f}")
-    data = data.astype(np.float32)
-    
+            _p(f"[5] Valid range: {data.min():.2f} – {data.max():.2f}")
+
     # Get geotransform and compute coordinate arrays for each downsampled pixel centre
     gt = ds.GetGeoTransform()
     # x coordinates: left edge + half-pixel offset for the first centre
@@ -122,12 +200,32 @@ def quick_view_dtm(input_path, sample_step=10, cmap='viridis', figsize=(12, 8), 
 
     ds = None
 
+    # imshow(extent=...) convention: [xmin, xmax, ymin, ymax]
+    extent = [x_coords[0], x_coords[-1], y_coords[-1], y_coords[0]]
+    return data, extent
+
+
+def quick_view_dtm(input_path, sample_step=10, cmap='viridis', figsize=(12, 8), outpath=None, workers=1, show_cities=True):
+    """
+    Display a low‑resolution version of a DTM with coordinate axes.
+
+    Parameters
+    ----------
+    input_path : str
+        Path to the GeoTIFF file.
+    sample_step : int
+        Read every Nth pixel (both x and y) to reduce resolution.
+    cmap : str
+        Matplotlib colormap name (e.g., 'viridis', 'terrain', 'jet').
+    figsize : tuple
+        Figure size in inches.
+    """
+    data, extent = read_dtm_lowres(input_path, sample_step=sample_step, workers=workers)
+
     # Plot
     fig, ax = plt.subplots(figsize=figsize)
     # imshow expects extent = [left, right, bottom, top]
-    # Note: y_coords[0] is the top (largest Y), y_coords[-1] is the bottom (smallest Y)
-    im = ax.imshow(data, extent=[x_coords[0], x_coords[-1], y_coords[-1], y_coords[0]],
-                   cmap=cmap, aspect='auto')
+    im = ax.imshow(data, extent=extent, cmap=cmap, aspect='auto')
     cbar = fig.colorbar(im, ax=ax, label='Elevation (m)')
     ax.set_xlabel('X coordinate (map units)')
     ax.set_ylabel('Y coordinate (map units)')

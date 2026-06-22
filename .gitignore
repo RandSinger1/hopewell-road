@@ -45,3 +45,5 @@ report/output/*/.cache/
 # IDE / tooling
 .vscode/settings.json
 .claude
+CLAUDE.md
+todo.txt
