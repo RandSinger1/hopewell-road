@@ -406,6 +406,17 @@ REPORT_COORDS: list = [
     # this key to that index (e.g. 0) or a list of indices (e.g. [0, 2]) if
     # more than one pair is a confirmed earthwork, then run again — the
     # confirmed pair(s) are highlighted and all others greyed out.
+    #
+    # Target-angle resolution (report.report_utils.site_target_angle): by
+    # default the expected wall bearing is auto-detected from whichever of
+    # the three corridor segments passes closest to the site. Two ways to
+    # override that per-entry:
+    #   'mode': 'circleville' | 'chillicothe' | 'high_banks' — force this
+    #       segment's locally expected bearing at the site's longitude
+    #       (use when a site is near where legs diverge and auto-detect
+    #       might pick the wrong one).
+    #   'target_angle': <degrees> — force a fixed angle outright (reported
+    #       as mode 'manual'). Takes priority over 'mode' if both are set.
     {
         "name": "Van Voorhis Wall",
         "lat":   40.0, "lon": -82.4, "size_m": 200,
@@ -444,6 +455,22 @@ REPORT_COORDS: list = [
         "name": "Mount Zion Farm",
         "lat": 39.7, "lon": -82.7, "size_m": 200,
         "note": "eyeballed this one"
+    },
+    {
+        "name": "Another one near mount zion",
+        "lat": 39.7, "lon": -82.7, "size_m": 200,
+        "note": "eyeballed this one too"
+    },
+    {
+        "name": "Wilson Road Resivoir",
+        "lat": 39.7, "lon": -82.7, "size_m": 200,
+        "note": "Very weird"
+    },
+    {
+        "name": "HB Remnant",
+        "lat":39.5, "lon": -82.7, "size_m": 200,
+        "note": "Very correct looking, but faint, high bank work",
+        "mode": "high_banks",
     }
     # {
     #     "name": "Examine Later 3",

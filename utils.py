@@ -205,6 +205,30 @@ def parabola_from_angle_at_newark(angle_deg):
     return a, b, c, x_offset
 
 
+def _corridor_segments():
+    """
+    Build the three named corridor segments (curve_func, curve_deriv) pairs,
+    keyed by mode name. Shared by corridor_mode_and_angle (auto-detect) and
+    corridor_angle_for_mode (explicit mode).
+    """
+    import parameters as _p
+
+    return {
+        "circleville": make_parabola(
+            _p.PARABOLA_A, _p.PARABOLA_B, _p.PARABOLA_C,
+            x_offset=_p.PARABOLA_X_OFFSET,
+        ),
+        "chillicothe": make_line(
+            _p.CHILLICOTHE_COORD[1], _p.CHILLICOTHE_COORD[0],
+            _p.NEWARK_COORD[1], _p.NEWARK_COORD[0],
+        ),
+        "high_banks": make_line(
+            _p.HIGH_BANKS_COORD[1], _p.HIGH_BANKS_COORD[0],
+            _p.NEWARK_COORD[1], _p.NEWARK_COORD[0],
+        ),
+    }
+
+
 def corridor_mode_and_angle(lat, lon):
     """
     Pick the named corridor segment that passes closest to (lat, lon) and
@@ -226,27 +250,32 @@ def corridor_mode_and_angle(lat, lon):
     ROAD_BEARING_DEG (they're numerically identical: see tile_curve's
     "90 - geo_road_angle" comment in range_searcher.py).
     """
-    import parameters as _p
-
-    segments = {
-        "circleville": make_parabola(
-            _p.PARABOLA_A, _p.PARABOLA_B, _p.PARABOLA_C,
-            x_offset=_p.PARABOLA_X_OFFSET,
-        ),
-        "chillicothe": make_line(
-            _p.CHILLICOTHE_COORD[1], _p.CHILLICOTHE_COORD[0],
-            _p.NEWARK_COORD[1], _p.NEWARK_COORD[0],
-        ),
-        "high_banks": make_line(
-            _p.HIGH_BANKS_COORD[1], _p.HIGH_BANKS_COORD[0],
-            _p.NEWARK_COORD[1], _p.NEWARK_COORD[0],
-        ),
-    }
-
+    segments = _corridor_segments()
     mode, (_curve_func, curve_deriv) = min(
         segments.items(), key=lambda kv: abs(lat - kv[1][0](lon)),
     )
     return mode, corridor_angle_at(curve_deriv, lon)
+
+
+def corridor_angle_for_mode(mode, lon):
+    """
+    Expected wall bearing at `lon` along a specific named corridor segment,
+    bypassing the nearest-segment auto-detection in corridor_mode_and_angle.
+
+    Use this when the caller already knows which leg a site sits on (e.g. a
+    report site explicitly pinned to "high_banks") rather than wanting the
+    nearest-segment guess — useful near the Y where legs diverge from Newark,
+    where the auto-detect pick can be ambiguous.
+
+    Parameters
+    ----------
+    mode : 'circleville', 'chillicothe', or 'high_banks'
+    """
+    segments = _corridor_segments()
+    if mode not in segments:
+        raise ValueError(f"Unknown corridor mode {mode!r}; expected one of {sorted(segments)}")
+    _curve_func, curve_deriv = segments[mode]
+    return corridor_angle_at(curve_deriv, lon)
 
 
 def annotate_lines_corridor(lines, curve_func, curve_deriv_fn, lat_m=111_320.0):
