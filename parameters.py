@@ -471,6 +471,12 @@ REPORT_COORDS: list = [
         "lat":39.5, "lon": -82.7, "size_m": 200,
         "note": "Very correct looking, but faint, high bank work",
         "mode": "high_banks",
+    },
+    {
+        "name": "Rainbow Drive",
+        "lat": 39.7, "lon": -82.6, "size_m": 200,
+        "note": "probably trees",
+        "mode": "high_banks",
     }
     # {
     #     "name": "Examine Later 3",
