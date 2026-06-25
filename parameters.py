@@ -421,50 +421,58 @@ REPORT_COORDS: list = [
         "name": "Van Voorhis Wall",
         "lat":   40.0, "lon": -82.4, "size_m": 200,
         "note": "Ground truth — confirmed earthwork, 41 m width",
-        "true_positive_pair_index": [0, 8]
+        "mode": "all"
+        #"true_positive_pair_index": [0, 8]
     },
     {
         "name": "Beaver Run",
         "lat":   39.9, "lon": -82.5, "size_m": 200,
         "note": "Proposed route, 37 m width",
-        "true_positive_pair_index": 0
+        "mode": "all"
+        #"true_positive_pair_index": 0
     },
     {
         "name": "Route 40",
         "lat":   39.9, "lon": -82.5, "size_m": 200,
         "note": "Proposed route, 33 m width",
-        "true_positive_pair_index": 1
+        "mode": "all"
+        #"true_positive_pair_index": 1
     },
     {
         "name": "Blacklick Eastern",
         "lat": 39.9, "lon": -82.5, "size_m": 200,
-        "note": "Proposed route"    
+        "note": "Proposed route"
+        "mode": "chillicothe, high_banks" 
     },
-    {
-        "name": "Route 159",
-        "lat": 39.4, "lon": -82.9, "size_m": 200,
-        "note": "Not visible, but worth checking out"
-    },
+    # {
+    #     "name": "Route 159",
+    #     "lat": 39.4, "lon": -82.9, "size_m": 200,
+    #     "note": "Not visible, but worth checking out",
+    #     "mode": "chillicothe"
+    # },
     {
         "name": "Canal Rd",
         "lat":   39.8, "lon": -82.5, "size_m": 200,
         "note": "Proposed route",
-        "true_positive_pair_index": 0
+        "mode": "all"
+        #"true_positive_pair_index": 0
     },
     {
         "name": "Mount Zion Farm",
         "lat": 39.7, "lon": -82.7, "size_m": 200,
-        "note": "eyeballed this one"
+        "note": "eyeballed this one",
+        "mode": "circleville",
     },
     {
-        "name": "Another one near mount zion",
+        "name": "Mount Zion Farm 2",
         "lat": 39.7, "lon": -82.7, "size_m": 200,
         "note": "eyeballed this one too"
     },
     {
         "name": "Wilson Road Resivoir",
         "lat": 39.7, "lon": -82.7, "size_m": 200,
-        "note": "Very weird"
+        "note": "Very weird",
+        "mode": "circleville",
     },
     {
         "name": "HB Remnant",

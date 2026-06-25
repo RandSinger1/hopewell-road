@@ -19,7 +19,7 @@ import matplotlib.pyplot as plt
 import matplotlib.lines as mlines
 
 from .base_compute import get_terrain, get_detection
-from .report_utils import save_figure, site_target_angle
+from .report_utils import save_figure, site_target_angle, pair_to_geo
 from . import config as cfg
 import parameters
 
@@ -59,8 +59,15 @@ def _run_detection(coord: dict, dtm_path: str, output_dir: Path,
         detected = False
         if pairs:
             detected = True
-            (x0, y0), (x1, y1) = pairs[0]["line1"]
-            bearing = np.degrees(np.arctan2(x1 - x0, -(y1 - y0))) % 180
+            # Convert to geo coords then apply cos(lat) so _line_endpoints
+            # (which works in physical metres) draws the line at the correct angle.
+            geo_segs = pair_to_geo(pairs[0], extent, raw.shape)
+            (gx0, gy0), (gx1, gy1) = geo_segs[0]
+            cos_lat = np.cos(np.radians((gy0 + gy1) / 2))
+            bearing = np.degrees(np.arctan2(
+                (gx1 - gx0) * cos_lat * 111_320.0,
+                (gy1 - gy0) * 111_320.0,
+            )) % 180
 
         return {**coord, "bearing": bearing, "mode": mode, "detected": detected,
                 "raw": raw, "lrm": lrm, "extent": extent, "nodata": nodata, "pairs": pairs}
@@ -89,13 +96,15 @@ def _corridor_extent(coords: list[dict], pad: float = 0.10):
 def _newark_chillicothe_bearing() -> float:
     n_lat, n_lon = _CITIES["Newark"]
     c_lat, c_lon = _CITIES["Chillicothe"]
-    return np.degrees(np.arctan2(c_lon - n_lon, c_lat - n_lat)) % 360
+    cos_lat = np.cos(np.radians((n_lat + c_lat) / 2))
+    return np.degrees(np.arctan2((c_lon - n_lon) * cos_lat, c_lat - n_lat)) % 360
 
 
 def _newark_high_banks_bearing() -> float:
     n_lat, n_lon = _CITIES["Newark"]
     h_lat, h_lon = _CITIES["High Banks"]
-    return np.degrees(np.arctan2(h_lon - n_lon, h_lat - n_lat)) % 360
+    cos_lat = np.cos(np.radians((n_lat + h_lat) / 2))
+    return np.degrees(np.arctan2((h_lon - n_lon) * cos_lat, h_lat - n_lat)) % 360
 
 
 # ── shared map drawing ────────────────────────────────────────────────────────

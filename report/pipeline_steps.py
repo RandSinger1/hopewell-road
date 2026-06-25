@@ -233,7 +233,7 @@ def generate_pipeline_figure(coord: dict, dtm_path: str, output_dir: Path,
                             color=style["colors"][k], linewidth=style["linewidth"],
                             alpha=style["alpha"], zorder=style["zorder"])
 
-        # Index + spacing label at the midpoint between the two line midpoints
+        # Index + spacing + azimuth label at midpoint between the two line midpoints
         (ax0, ay0), (ax1, ay1) = geo_segs[0]
         (bx0, by0), (bx1, by1) = geo_segs[1]
         mid_ax, mid_ay = (ax0 + ax1) / 2, (ay0 + ay1) / 2
@@ -241,8 +241,13 @@ def generate_pipeline_figure(coord: dict, dtm_path: str, output_dir: Path,
         label_lon = (mid_ax + mid_bx) / 2
         label_lat = (mid_ay + mid_by) / 2
         spacing_m = pair["spacing"] * m_per_px
+        cos_lat_seg = np.cos(np.radians((ay0 + ay1) / 2))
+        pair_azimuth = np.degrees(np.arctan2(
+            (ax1 - ax0) * cos_lat_seg * 111_320.0,
+            (ay1 - ay0) * 111_320.0,
+        )) % 180
         axes[1, 4].annotate(
-            f"{style['label_text']}  {spacing_m:.0f} m",
+            f"{style['label_text']}  {spacing_m:.0f} m  {pair_azimuth:.0f}°",
             xy=(label_lon, label_lat),
             fontsize=6.5, color=style["label_color"], fontweight="bold",
             ha="center", va="center", zorder=style["zorder"] + 1,
