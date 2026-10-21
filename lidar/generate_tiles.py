@@ -10,6 +10,8 @@ from io import BytesIO
 from urllib.parse import urlparse
 from pathlib import Path
 
+from lidar.tile_filter import tile_file_stem
+
 
 def parse_args():
     import argparse
@@ -81,7 +83,9 @@ def generate_tiles(tiles, area, max_workers=4):
     output_dir.mkdir(parents=True, exist_ok=True)
     failed_log = Path(f'data/loaded_tiles/{area}/failed_downloads.txt')
 
-    work = [(idx, url, output_dir / f'tile_{idx}.laz') for idx, url in enumerate(tiles)]
+    # Name by USGS file stem, not list index, so filtering/reordering a list
+    # never remaps an existing file to a different tile.
+    work = [(idx, url, output_dir / f'{tile_file_stem(url)}.laz') for idx, url in enumerate(tiles)]
     total = len(work)
     done = 0
     failures = []
@@ -100,7 +104,7 @@ def generate_tiles(tiles, area, max_workers=4):
     if failures:
         with open(failed_log, 'w') as f:
             for idx, url, err in sorted(failures):
-                f.write(f"tile_{idx}\t{url}\t{err}\n")
+                f.write(f"{tile_file_stem(url)}\t{url}\t{err}\n")
         print(f"{len(failures)} failed download(s) logged to {failed_log}")
     elif failed_log.exists():
         failed_log.unlink()  # clean up old log if everything succeeded this run

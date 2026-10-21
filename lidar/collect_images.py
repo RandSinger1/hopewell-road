@@ -1,5 +1,7 @@
 from pathlib import Path
 from AOI2List.src.aoi2list import query_polygon
+from lidar.tile_filter import drop_superseded, summarize
+import parameters
 import json
 import argparse
 
@@ -43,14 +45,21 @@ def array_to_wkt_string(coordinates: list) -> str:
     return wkt_string
 
 
-def main(AREA="Hart_Island", n_splits=10) -> list[str]:
-    """Fetch tile metadata and save JSON file lists. Returns the sub-area names written."""
+def main(AREA="Hart_Island", n_splits=10, keep_superseded=None) -> list[str]:
+    """Fetch tile metadata and save JSON file lists. Returns the sub-area names written.
+
+    Unless keep_superseded (default: not parameters.DROP_SUPERSEDED_TILES),
+    tiles from older collections that newer ones cover are dropped — see
+    lidar/tile_filter.py.
+    """
+    if keep_superseded is None:
+        keep_superseded = not parameters.DROP_SUPERSEDED_TILES
     output_dir = _PROJECT_ROOT / "data" / "saved_file_lists"
     output_dir.mkdir(exist_ok=True)
     polygons = get_polygons(AREA, n_splits=n_splits)
     created: list[str] = []
     for i in range(n_splits):
-        area_temp = f"{AREA}_{i}"
+        area_temp = f"{AREA}_{i}" if n_splits > 1 else AREA
         wkt = array_to_wkt_string(polygons[area_temp])
         metadata = None
         for _ in range(10):
@@ -60,6 +69,12 @@ def main(AREA="Hart_Island", n_splits=10) -> list[str]:
             except Exception as e:
                 print(f"Error fetching data for {area_temp}: {e}. Retrying...")
         if metadata:
+            if not keep_superseded:
+                metadata, dropped = drop_superseded(
+                    metadata, aoi=polygons[area_temp],
+                    threshold=parameters.SUPERSEDED_COVERAGE_THRESHOLD)
+                if dropped:
+                    print(f"  [{area_temp}] dropped {len(dropped)} superseded tile(s): {summarize(dropped)}")
             with open(output_dir / f"{area_temp}.json", "w") as f:
                 json.dump(metadata, f)
             created.append(area_temp)
@@ -70,5 +85,8 @@ if __name__ == "__main__":
     parser.add_argument("area", type=str, help="Area to fetch (e.g., Hopewell_Road, Circleville_Road, Hart_Island)")
     parser.add_argument("--area-splits", type=int, default=10, metavar="N",
                         help="Number of sub-segments for road-type polygons (default 10)")
+    parser.add_argument("--keep-superseded", action="store_true",
+                        help="Keep tiles from older collections even where newer ones cover them "
+                             "(use for multi-year areas like Hart_Island)")
     args = parser.parse_args()
-    main(args.area, n_splits=args.area_splits)
+    main(args.area, n_splits=args.area_splits, keep_superseded=args.keep_superseded or None)

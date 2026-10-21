@@ -1,10 +1,6 @@
 # Generated / downloaded data
 loaded_tiles
 data/*
-# Keep committed data files
-!data/polygons.json
-!data/saved_file_lists/
-!data/saved_file_lists/**
 
 # Build artefacts
 build
@@ -16,6 +12,7 @@ __pycache__
 *.egg-info/
 dist/
 .eggs/
+scripts
 
 # Virtual environments
 venv/
@@ -27,6 +24,8 @@ env/
 *.ipynb
 *.docx
 *.pdf
+*.zip
+*.xlsx
 
 # Scripts (keep setup scripts; ignore scratch scripts)
 !setup_env.ps1
@@ -40,10 +39,13 @@ env/
 app/.dtm_cache
 
 # Report cache (cached DTM/detection intermediates — regenerated on demand)
-report/output/*/.cache/
+report/output
 
 # IDE / tooling
 .vscode/settings.json
 .claude
 CLAUDE.md
 todo.txt
+
+# experiments/ point-cloud + DTM cache
+experiments/.cache/

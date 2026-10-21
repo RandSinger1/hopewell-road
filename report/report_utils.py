@@ -16,6 +16,9 @@ from utils import corridor_mode_and_angle, corridor_angle_for_mode
 
 # ─── Target angle resolution ──────────────────────────────────────────────────
 
+_SINGLE_MODES = frozenset({"circleville", "chillicothe", "high_banks"})
+
+
 def site_target_angle(coord: dict) -> tuple:
     """
     Resolve the expected wall bearing for one REPORT_COORDS site.
@@ -23,12 +26,12 @@ def site_target_angle(coord: dict) -> tuple:
     Three ways to resolve it, checked in order:
       1. "target_angle" in the REPORT_COORDS entry — a fixed angle override,
          reported as mode "manual".
-      2. "mode" in the REPORT_COORDS entry — one of "circleville",
+      2. "mode" in the REPORT_COORDS entry — exactly one of "circleville",
          "chillicothe", "high_banks". Forces that segment's locally expected
-         bearing at the site's longitude (utils.corridor_angle_for_mode),
-         instead of guessing which leg the site is on.
-      3. Neither set — auto-detect whichever named corridor segment passes
-         closest to the site (utils.corridor_mode_and_angle).
+         bearing at the site's longitude (utils.corridor_angle_for_mode).
+         Values like "all" or "chillicothe, high_banks" fall through to auto.
+      3. Neither set (or mode is "all"/comma-separated) — auto-detect whichever
+         named corridor segment passes closest to the site.
 
     Returns (mode, angle_deg).
     """
@@ -36,9 +39,26 @@ def site_target_angle(coord: dict) -> tuple:
     if override is not None:
         return "manual", override
     mode = coord.get("mode")
-    if mode is not None:
+    if mode in _SINGLE_MODES:
         return mode, corridor_angle_for_mode(mode, coord["lon"])
     return corridor_mode_and_angle(coord["lat"], coord["lon"])
+
+
+def site_paths(coord: dict) -> set:
+    """
+    Return the set of corridor paths this site belongs to for sub-report filtering.
+
+    mode=None or "all"              → all three paths
+    mode="circleville"              → {"circleville"}
+    mode="chillicothe, high_banks"  → {"chillicothe", "high_banks"}
+    """
+    mode = coord.get("mode")
+    if mode is None or mode == "all":
+        return set(_SINGLE_MODES)
+    if mode in _SINGLE_MODES:
+        return {mode}
+    parts = {m.strip() for m in mode.split(",")}
+    return parts & _SINGLE_MODES
 
 
 # ─── Figure helpers ───────────────────────────────────────────────────────────

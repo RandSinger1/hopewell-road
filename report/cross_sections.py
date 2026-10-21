@@ -68,35 +68,54 @@ def generate_cross_section_figure(coord: dict, dtm_path: str, output_dir: Path,
     half_w = cfg.CROSS_SECTION_HALF_WIDTH_M
     n_samp = cfg.CROSS_SECTION_N_SAMPLES
 
-    n_off = len(offsets)
-    profile_cmap = cm.get_cmap("plasma", n_off)
+    # Each plotted profile is the mean of all transects within the strip
+    # between two consecutive offset positions, giving a more complete view
+    # of the detected walls than a single sample line.
+    n_strips = max(1, len(offsets) - 1)
+    profile_cmap = cm.get_cmap("plasma", n_strips)
 
-    print(f"  [cross_sections] sampling {n_off} transects …")
+    print(f"  [cross_sections] sampling {n_strips} strip means ({len(offsets)} offsets) …")
     dists_all = np.linspace(-half_w, half_w, n_samp)  # shared x-axis
     profiles_raw: list = []
     profiles_dt: list = []
     valid_offsets: list = []
 
-    for i, off_m in enumerate(offsets):
-        lat_c = lat + off_m * road_north / 111320.0
-        lon_c = lon + off_m * road_east / (111320.0 * np.cos(np.radians(lat)))
+    cos_lat = np.cos(np.radians(lat))
+    for i in range(len(offsets) - 1):
+        off_start = offsets[i]
+        off_end   = offsets[i + 1]
+        off_mid   = (off_start + off_end) / 2.0
 
-        dists, elev = sample_profile(
-            smoothed, extent, lat_c, lon_c,
-            bearing, half_w, n_samp, nodata=nodata,
-        )
-        _, elev_lrm = sample_profile(
-            lrm, extent, lat_c, lon_c,
-            bearing, half_w, n_samp, nodata=nodata,
-        )
+        # Sub-sample ~1 transect per metre within the strip
+        n_sub = max(3, abs(int(off_end - off_start)))
+        sub_offs = np.linspace(off_start, off_end, n_sub)
 
-        valid = ~np.isnan(elev)
+        strip_elev = []
+        strip_lrm  = []
+        for off in sub_offs:
+            lat_c = lat + off * road_north / 111320.0
+            lon_c = lon + off * road_east / (111320.0 * cos_lat)
+            _, elev = sample_profile(
+                smoothed, extent, lat_c, lon_c,
+                bearing, half_w, n_samp, nodata=nodata,
+            )
+            _, elev_lrm = sample_profile(
+                lrm, extent, lat_c, lon_c,
+                bearing, half_w, n_samp, nodata=nodata,
+            )
+            strip_elev.append(elev)
+            strip_lrm.append(elev_lrm)
+
+        mean_elev = np.nanmean(np.vstack(strip_elev), axis=0)
+        mean_lrm  = np.nanmean(np.vstack(strip_lrm),  axis=0)
+
+        valid = ~np.isnan(mean_elev)
         if valid.sum() < 4:
             continue
 
-        profiles_raw.append(elev)
-        profiles_dt.append(elev_lrm)
-        valid_offsets.append((i, off_m))
+        profiles_raw.append(mean_elev)
+        profiles_dt.append(mean_lrm)
+        valid_offsets.append((i, off_mid))
 
     if not profiles_raw:
         print(f"  [cross_sections] no valid profiles — skipped.")
@@ -111,14 +130,14 @@ def generate_cross_section_figure(coord: dict, dtm_path: str, output_dir: Path,
         gridspec_kw={"wspace": 0.12},
     )
     fig.suptitle(
-        f"Cross-Section Profiles  ·  {name.replace('_', ' ')}  "
+        f"Cross-Section Strip Means  ·  {name.replace('_', ' ')}  "
         f"({lat:.4f}°N, {lon:.4f}°E)  ·  road bearing {bearing:.0f}°",
         fontsize=12, color="white",
     )
 
     for (i_off, off_m), elev, detrended in zip(valid_offsets, profiles_raw, profiles_dt):
-        color = profile_cmap(i_off / max(1, n_off - 1))
-        lbl = f"{off_m:+d} m"
+        color = profile_cmap(i_off / max(1, n_strips - 1))
+        lbl = f"{off_m:+.0f} m"
         ax_raw.plot(dists_all, elev,     color=color, alpha=alpha, linewidth=0.9, label=lbl)
         ax_dt.plot(dists_all, detrended, color=color, alpha=alpha, linewidth=0.9)
 
@@ -181,7 +200,7 @@ def generate_cross_section_figure(coord: dict, dtm_path: str, output_dir: Path,
     sm.set_array([])
     cbar = fig.colorbar(sm, ax=[ax_raw, ax_dt], orientation="vertical",
                          pad=0.01, fraction=0.012, shrink=0.85)
-    cbar.set_label("Along-road offset (m)", color="lightgray", fontsize=8)
+    cbar.set_label("Along-road strip midpoint (m)", color="lightgray", fontsize=8)
     cbar.ax.yaxis.set_tick_params(colors="gray")
 
     save_figure(fig, output_dir / name, "cross_sections.png", dpi=cfg.DPI)

@@ -22,6 +22,7 @@ from .base_compute import get_terrain, get_detection
 from .report_utils import save_figure, site_target_angle, pair_to_geo
 from . import config as cfg
 import parameters
+from utils import make_parabola
 
 
 _CITIES = {
@@ -109,13 +110,34 @@ def _newark_high_banks_bearing() -> float:
 
 # ── shared map drawing ────────────────────────────────────────────────────────
 
+def _draw_circleville_parabola(ax: plt.Axes) -> None:
+    """Draw the parabolic Circleville corridor curve."""
+    curve_fn, _ = make_parabola(
+        parameters.PARABOLA_A, parameters.PARABOLA_B,
+        parameters.PARABOLA_C, parameters.PARABOLA_X_OFFSET,
+    )
+    c_lon = _CITIES["Circleville"][1]
+    n_lon = _CITIES["Newark"][1]
+    lons = np.linspace(c_lon, n_lon, 300)
+    lats = np.array([curve_fn(lon) for lon in lons])
+    ax.plot(lons, lats, color="#90d090", linewidth=1.5, linestyle="--",
+            alpha=0.8, zorder=3)
+    mid = len(lons) // 2
+    ax.annotate("circleville", xy=(lons[mid], lats[mid]),
+                xytext=(-50, 6), textcoords="offset points",
+                fontsize=7, color="#90d090", alpha=0.85)
+
+
 def _draw_corridor_map(ax: plt.Axes, sites: list[dict],
-                       focus_name: str | None = None) -> None:
+                       focus_name: str | None = None,
+                       path_name: str | None = None) -> None:
     """
     Draw the full corridor map onto ax.
 
     focus_name : if given, that site is highlighted; all others are dimmed.
                  If None, all sites are drawn at equal weight (overview mode).
+    path_name  : corridor path being displayed; draws the parabola when
+                 "circleville".
     """
     coords = [{k: s[k] for k in ("lat", "lon", "name")} for s in sites]
     xmin, xmax, ymin, ymax = _corridor_extent(coords)
@@ -127,14 +149,6 @@ def _draw_corridor_map(ax: plt.Axes, sites: list[dict],
         sp.set_edgecolor("#333333")
     ax.set_xlabel("Longitude", fontsize=8, color="lightgray")
     ax.set_ylabel("Latitude",  fontsize=8, color="lightgray")
-
-    # scan-corridor polygon
-    poly = getattr(parameters, "SCAN_POLYGON", [])
-    if poly:
-        lats_p = [p[0] for p in poly] + [poly[0][0]]
-        lons_p = [p[1] for p in poly] + [poly[0][1]]
-        ax.plot(lons_p, lats_p, color="#2a3a4a", linewidth=1.2,
-                linestyle="--", zorder=2)
 
     # Newark → Chillicothe azimuth line
     n_lat, n_lon = _CITIES["Newark"]
@@ -161,6 +175,9 @@ def _draw_corridor_map(ax: plt.Axes, sites: list[dict],
     ax.annotate(f"az {az_hb:.1f}°", xy=(mid_lon_hb, mid_lat_hb),
                 xytext=(-30, 6), textcoords="offset points",
                 fontsize=7, color="#cc99ff", alpha=0.85)
+
+    # Circleville parabola (always shown — completes the three-leg corridor picture)
+    _draw_circleville_parabola(ax)
 
     # cities
     for city, (clat, clon) in _CITIES.items():
@@ -217,7 +234,27 @@ def _draw_corridor_map(ax: plt.Axes, sites: list[dict],
 
 # ── per-site figure ───────────────────────────────────────────────────────────
 
-def _save_site_figure(focus: dict, all_sites: list[dict], output_dir: Path) -> None:
+def _legend_handles(path_name: str | None) -> list:
+    handles = [
+        mlines.Line2D([], [], color="#f0c040", linewidth=2.5, label="Detected bearing"),
+        mlines.Line2D([], [], color="#ff7060", linewidth=2.5,
+                      label="Fallback (corridor mode bearing)"),
+        mlines.Line2D([], [], color="#888888", linewidth=1.2, alpha=0.5,
+                      label="Other sites"),
+        mlines.Line2D([], [], color="#5b9bd5", linewidth=0,
+                      marker="D", markersize=7, label="City"),
+        mlines.Line2D([], [], color="#a0c8e0", linewidth=1.5,
+                      linestyle="--", label="Newark – Chillicothe"),
+        mlines.Line2D([], [], color="#cc99ff", linewidth=1.5,
+                      linestyle="--", label="Newark – High Banks"),
+    ]
+    handles.append(mlines.Line2D([], [], color="#90d090", linewidth=1.5,
+                                 linestyle="--", label="Circleville parabola"))
+    return handles
+
+
+def _save_site_figure(focus: dict, all_sites: list[dict], output_dir: Path,
+                      path_name: str | None = None) -> None:
     name    = focus["name"]
     bearing = focus["bearing"]
     mode    = focus["mode"]
@@ -232,23 +269,9 @@ def _save_site_figure(focus: dict, all_sites: list[dict], output_dir: Path) -> N
         fontsize=12, color="white", pad=10,
     )
 
-    _draw_corridor_map(ax, all_sites, focus_name=name)
+    _draw_corridor_map(ax, all_sites, focus_name=name, path_name=path_name)
 
-    # legend
-    legend_handles = [
-        mlines.Line2D([], [], color="#f0c040", linewidth=2.5, label="Detected bearing"),
-        mlines.Line2D([], [], color="#ff7060", linewidth=2.5,
-                      label="Fallback (corridor mode bearing)"),
-        mlines.Line2D([], [], color="#888888", linewidth=1.2, alpha=0.5,
-                      label="Other sites"),
-        mlines.Line2D([], [], color="#5b9bd5", linewidth=0,
-                      marker="D", markersize=7, label="City"),
-        mlines.Line2D([], [], color="#a0c8e0", linewidth=1.5,
-                      linestyle="--", label="Newark – Chillicothe"),
-        mlines.Line2D([], [], color="#cc99ff", linewidth=1.5,
-                      linestyle="--", label="Newark – High Banks"),
-    ]
-    ax.legend(handles=legend_handles, fontsize=8, loc="lower right",
+    ax.legend(handles=_legend_handles(path_name), fontsize=8, loc="lower right",
               facecolor="#1e1e1e", edgecolor="#444444",
               labelcolor="lightgray", framealpha=0.9)
 
@@ -258,7 +281,8 @@ def _save_site_figure(focus: dict, all_sites: list[dict], output_dir: Path) -> N
 # ── main entry point ──────────────────────────────────────────────────────────
 
 def generate_overview_map(coords: list[dict], dtm_path: str, output_dir: Path,
-                           use_cache: bool = True) -> None:
+                           use_cache: bool = True,
+                           path_name: str | None = None) -> None:
     print("  [overview] running detection at each site …")
 
     sites: list[dict] = []
@@ -270,29 +294,21 @@ def generate_overview_map(coords: list[dict], dtm_path: str, output_dir: Path,
 
     # per-site figures (full map, focused site highlighted)
     for s in sites:
-        _save_site_figure(s, sites, output_dir)
+        _save_site_figure(s, sites, output_dir, path_name=path_name)
 
     # corridor overview (all sites equal weight)
     fig, ax = plt.subplots(figsize=(11, 9), facecolor="#1a1a1a")
     ax.set_facecolor("#0d1117")
+    path_label = f"  ·  {path_name}" if path_name else ""
     ax.set_title(
-        "Hopewell Earthwork Corridor  ·  Detected wall bearings",
+        f"Hopewell Earthwork Corridor{path_label}  ·  Detected wall bearings",
         fontsize=12, color="white", pad=10,
     )
-    _draw_corridor_map(ax, sites, focus_name=None)
+    _draw_corridor_map(ax, sites, focus_name=None, path_name=path_name)
 
-    legend_handles = [
-        mlines.Line2D([], [], color="#f0c040", linewidth=2.5, label="Detected bearing"),
-        mlines.Line2D([], [], color="#ff7060", linewidth=2.5,
-                      label="Fallback (corridor mode bearing)"),
-        mlines.Line2D([], [], color="#5b9bd5", linewidth=0,
-                      marker="D", markersize=7, label="City"),
-        mlines.Line2D([], [], color="#a0c8e0", linewidth=1.5,
-                      linestyle="--", label="Newark – Chillicothe"),
-        mlines.Line2D([], [], color="#cc99ff", linewidth=1.5,
-                      linestyle="--", label="Newark – High Banks"),
-    ]
-    ax.legend(handles=legend_handles, fontsize=8, loc="lower right",
+    overview_handles = [h for h in _legend_handles(path_name)
+                        if h.get_label() != "Other sites"]
+    ax.legend(handles=overview_handles, fontsize=8, loc="lower right",
               facecolor="#1e1e1e", edgecolor="#444444",
               labelcolor="lightgray", framealpha=0.9)
 

@@ -10,6 +10,7 @@ from multiprocessing import freeze_support
 import argparse
 
 import parameters
+from lidar.tile_filter import merge_order_key
 
 # ---------- configuration ----------
 VERBOSE = 1
@@ -403,7 +404,9 @@ def merge_dtms(sub_areas: list[str], output_path, workers: int = 1,
     for sa in sub_areas:
         d = base / sa / "dtm_tiles"
         if d.exists():
-            tiles = [str(t) for t in sorted(d.glob("*.tif"))]
+            # Oldest collection first: gdal.Warp lets later sources overwrite
+            # earlier ones, so newer data wins wherever collections overlap.
+            tiles = [str(t) for t in sorted(d.glob("*.tif"), key=merge_order_key)]
             if tiles:
                 tiles_by_area[sa] = tiles
 

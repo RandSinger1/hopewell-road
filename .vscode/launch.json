@@ -75,6 +75,20 @@
             "justMyCode": false
         },
         {
+            "name": "LiDAR: Generate Zorro Ranch DTM",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "lidar.run_pipeline",
+            "args": [
+                "Zorro_Ranch",
+                "--pdal-workers", "10",
+                "--area-splits", "1"
+            ],
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "justMyCode": false
+        },
+        {
             "name": "Road Model: Ridge Detection + Road Modeler",
             "type": "debugpy",
             "request": "launch",
@@ -126,7 +140,7 @@
             "type": "debugpy",
             "request": "launch",
             "module": "report.run_report",
-            "args": ["--only", "HB Remnant"],
+            "args": ["--workers", "10"],
             "cwd": "${workspaceFolder}",
             "console": "integratedTerminal",
             "justMyCode": false

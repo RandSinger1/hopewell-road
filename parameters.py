@@ -50,6 +50,18 @@ NODATA: float = -9999.0
 # §3  POINT-CLOUD INGESTION  (pdal_pipeline.py)
 # ═══════════════════════════════════════════════════════════════════════════════
 
+# ── Tile-list filtering (collect_images.py → lidar/tile_filter.py) ───────────
+
+DROP_SUPERSEDED_TILES: bool = True
+"""Drop tiles from an older collection when newer collections already cover
+them (e.g. legacy OH_SOUTH_2006/2007 under OH_Statewide 2020/2021).  Disable
+(or pass --keep-superseded) for deliberately multi-year areas like Hart_Island."""
+
+SUPERSEDED_COVERAGE_THRESHOLD: float = 0.95
+"""Fraction of a tile's AOI-clipped footprint that newer collections must
+cover for the tile to be dropped.  Partially-covered older tiles are kept to
+fill gaps; merge_dtms warps them first so newer data wins in overlaps."""
+
 # ── Statistical outlier removal (filters.outlier) ────────────────────────────
 
 OUTLIER_MEAN_K: int = 8
@@ -62,25 +74,34 @@ deviations are flagged as noise."""
 # ── SMRF ground classification (filters.smrf) ────────────────────────────────
 # Simple Morphological Filter — Pingel et al. (2013).
 # Increase SMRF_WINDOW / decrease SMRF_SLOPE for flatter, more forested terrain.
+#
+# UNITS: PDAL applies these in the point cloud's CRS units.  The Ohio tiles are
+# NAD83(2011) / Ohio South (ftUS) + NAVD88 height (ftUS), so every distance in
+# this block and DTM_RESOLUTION below is in US SURVEY FEET (1 ft = 0.3048 m),
+# not metres.  PDAL's own documented defaults (window 18, threshold 0.5) assume
+# metres.
 
 SMRF_CELL: float = 1.0
-"""Initial raster cell size (m) for the progressive morphological surface."""
+"""Initial raster cell size (ftUS) for the progressive morphological surface.
+1.0 ft = 0.30 m."""
 
 SMRF_WINDOW: float = 24.0
-"""Maximum window radius (m) for the progressive filter.  Larger values
-classify points on top of wide, low vegetation as ground."""
+"""Maximum window radius (ftUS) for the progressive filter.  24 ft = 7.3 m.
+Larger values remove wider above-ground objects (buildings, tree clumps)."""
 
-SMRF_SLOPE: float = 0.2
-"""Maximum allowed slope (m/m) between adjacent ground cells."""
+SMRF_SLOPE: float = 0.4
+"""Maximum allowed slope between adjacent ground cells (rise/run, unitless —
+the same in feet or metres)."""
 
 SMRF_THRESHOLD: float = 0.5
-"""Maximum elevation above the model surface (m) for a point to be ground."""
+"""Maximum height above the provisional surface (ftUS) for a point to be
+ground.  0.5 ft = 0.15 m."""
 
 SMRF_SCALAR: float = 1.25
-"""Window-size growth factor between progressive filter iterations."""
+"""Elevation scaling factor applied to the threshold on steep cells (unitless)."""
 
 SMRF_CUT: float = 0.0
-"""Distance below the model surface; points within this band are always ground."""
+"""Optional cut-net height (ftUS) for a pre-opening of the surface; 0 disables it."""
 
 SMRF_RETURNS: str = "last,only"
 """LAS return types passed to the SMRF filter ('last,only' keeps last returns
@@ -89,8 +110,15 @@ and single returns, which are most likely to reach the ground)."""
 # ── DTM rasterisation (writers.gdal) ─────────────────────────────────────────
 
 DTM_RESOLUTION: float = 1.0
-"""Output grid cell size in metres.  Must match the point density; 1 m is
-appropriate for the ~8 pts/m² density of OGRIP Ohio LiDAR."""
+"""Output grid cell size in the tiles' CRS units, i.e. US survey FEET:
+1.0 → 0.30 m pixels, which is the pixel size of merged_dtm.tif.  The
+OH_Statewide 2020/2021 data (served via USGS; same data OGRIP distributes) is
+dense enough for this: ~12–22 pts/m² measured at the Van Voorhis / Route 40
+sites.
+
+Per-tile DTMs keep elevations in feet; gdal.Warp to EPSG:4326 in merge_dtms
+converts heights, so merged_dtm.tif elevations (and everything derived from
+it — LRM, cross-sections) are in METRES."""
 
 DTM_INTERP_METHOD: str = "idw"
 """PDAL/GDAL interpolation algorithm for DTM gridding.
@@ -123,14 +151,21 @@ WARP_CREATION_OPTS: list = [
 # §4  DTM PRE-PROCESSING  (process_dtm.py)
 # ═══════════════════════════════════════════════════════════════════════════════
 
+# UNITS: everything here and in §5 marked "pixels"/"cells" is in DTM pixels,
+# and merged_dtm.tif pixels are 0.30 m (DTM_RESOLUTION = 1 ftUS), NOT 1 m.
+# Multiply by 0.30 for the size on the ground.  If DTM_RESOLUTION changes,
+# every pixel-based value below changes its ground size with it.
+
 MEDIAN_SMOOTH_RADIUS: int = 5
-"""Kernel half-size (cells) for the nodata-aware median filter.
-Full kernel = (2 × radius + 1)².  Removes sub-metre noise while
-preserving sharp earthwork edges."""
+"""Kernel half-size (pixels) for the nodata-aware median filter.
+Full kernel = (2 × radius + 1)² = 11 × 11 px ≈ 3.4 m square on the ground.
+Removes sub-metre noise while preserving sharp earthwork edges."""
 
 LRM_RADIUS: int = 40
-"""Neighbourhood half-size (cells) for the Local Relief Model surface estimate.
-The LRM = elevation − local_surface highlights micro-topography."""
+"""Neighbourhood half-size (pixels) for the Local Relief Model surface estimate.
+40 px ≈ 12 m on the ground (81 px ≈ 25 m full window) — narrower than the
+38–42 m wall spacing.  The LRM = elevation − local_surface highlights
+micro-topography; values are in metres."""
 
 LRM_METHOD: str = "median"
 """Surface estimator used to compute the regional baseline in the LRM.
@@ -139,16 +174,16 @@ LRM_METHOD: str = "median"
            consistent with the upstream median-smoothing step)."""
 
 RIDGE_SCALES: list = [1, 2, 3, 6]
-"""Frangi vesselness filter scales (σ, in pixels ≈ metres at 1 m/px).
-The maximum response across all scales is used.  Smaller σ → narrow ridges;
-larger σ → broad earthen banks."""
+"""Frangi vesselness filter scales (Gaussian σ in pixels; × 0.30 for metres,
+so [1, 2, 3, 6] ≈ 0.3, 0.6, 0.9, 1.8 m).  The maximum response across all
+scales is used.  Smaller σ → narrow ridges; larger σ → broad earthen banks."""
 
 SCAN_RIDGE_SCALES: list = [4]
-"""Ridge scales used during the fast area scan (range_searcher.py).
-Single scale is ~4× faster than the full RIDGE_SCALES set."""
+"""Ridge scales (σ, pixels; 4 px ≈ 1.2 m) used during the fast area scan
+(range_searcher.py).  Single scale is ~4× faster than the full RIDGE_SCALES set."""
 
 SVF_RADIUS: int = 15
-"""Maximum horizon-search radius (cells) for sky-view factor computation."""
+"""Maximum horizon-search radius (pixels; 15 px ≈ 4.6 m) for sky-view factor."""
 
 SVF_DIRECTIONS: int = 16
 """Number of azimuth directions sampled per cell for sky-view factor."""
@@ -176,9 +211,9 @@ SPACING_METERS: float = 38.0
 # ── Hessian orientation filter ────────────────────────────────────────────────
 
 HESSIAN_SIGMA: float = 2.0
-"""Gaussian smoothing σ (pixels) applied before computing the Hessian matrix
-for ridge-orientation estimation.  Larger values → less sensitive to noise
-but blur thin ridges."""
+"""Gaussian smoothing σ (pixels; 2 px ≈ 0.6 m) applied before computing the
+Hessian matrix for ridge-orientation estimation.  Larger values → less
+sensitive to noise but blur thin ridges."""
 # TODO: Should I raise this?
 
 ANGLE_TOLERANCE: float = 15.0
@@ -188,16 +223,19 @@ degrees from TARGET_ANGLE are excluded from the binary ridge mask."""
 # ── Binary thresholding & morphology ─────────────────────────────────────────
 
 RIDGE_THRESHOLD: float = .1
-"""Minimum LRM elevation (metres above local mean surface) to include a pixel
-in the binary ridge mask.  Lower → more candidates, more false positives."""
+"""Minimum Frangi ridge response (unitless, 0–1 — the vesselness map is
+normalised per window, not an elevation) for a pixel to enter the binary
+ridge mask.  Lower → more candidates, more false positives."""
 
 MORPH_DISK_RADIUS: float = 10
-"""Structuring-element radius (pixels) for binary closing before skeletonisation.
-Closes small gaps in fragmented ridge segments."""
+"""Structuring-element radius (pixels; ≈ 3 m) for binary closing.  Currently
+unused by ridge_detection.py (along-wall gap filling replaced it); only
+re-exported via report/config.py."""
 
 BINARY_MIN_OBJECT_SIZE: int = 200
 """Connected components with fewer than this many pixels are removed before
-skeletonisation (remove_small_objects).  Filters isolated speckle."""
+skeletonisation (remove_small_objects).  200 px ≈ 18 m² on the ground at
+0.30 m pixels.  Filters isolated speckle."""
 
 WALL_GAP_WINDOW_RATIO: float = 2
 """Along-wall integration window half-length as a fraction of MIN_RIDGE_LENGTH_METERS.
@@ -421,53 +459,53 @@ REPORT_COORDS: list = [
         "name": "Van Voorhis Wall",
         "lat":   40.0, "lon": -82.4, "size_m": 200,
         "note": "Ground truth — confirmed earthwork, 41 m width",
-        "mode": "all"
-        #"true_positive_pair_index": [0, 8]
+        "mode": "all",
+        "true_positive_pair_index": 0
     },
     {
         "name": "Beaver Run",
         "lat":   39.9, "lon": -82.5, "size_m": 200,
         "note": "Proposed route, 37 m width",
-        "mode": "all"
-        #"true_positive_pair_index": 0
+        "mode": "all",
+        "true_positive_pair_index": 0
     },
     {
         "name": "Route 40",
         "lat":   39.9, "lon": -82.5, "size_m": 200,
         "note": "Proposed route, 33 m width",
-        "mode": "all"
-        #"true_positive_pair_index": 1
+        "mode": "all",
+        "true_positive_pair_index": 1
     },
-    {
-        "name": "Blacklick Eastern",
-        "lat": 39.9, "lon": -82.5, "size_m": 200,
-        "note": "Proposed route"
-        "mode": "chillicothe, high_banks" 
-    },
+    # {
+    #     "name": "Blacklick Eastern",
+    #     "lat": 39.9, "lon": -82.5, "size_m": 200,
+    #     "note": "Proposed route",
+    #     "mode": "chillicothe, high_banks"
+    # },
     # {
     #     "name": "Route 159",
     #     "lat": 39.4, "lon": -82.9, "size_m": 200,
     #     "note": "Not visible, but worth checking out",
     #     "mode": "chillicothe"
     # },
-    {
-        "name": "Canal Rd",
-        "lat":   39.8, "lon": -82.5, "size_m": 200,
-        "note": "Proposed route",
-        "mode": "all"
-        #"true_positive_pair_index": 0
-    },
-    {
-        "name": "Mount Zion Farm",
-        "lat": 39.7, "lon": -82.7, "size_m": 200,
-        "note": "eyeballed this one",
-        "mode": "circleville",
-    },
-    {
-        "name": "Mount Zion Farm 2",
-        "lat": 39.7, "lon": -82.7, "size_m": 200,
-        "note": "eyeballed this one too"
-    },
+    # {
+    #     "name": "Canal Rd",
+    #     "lat":   39.8, "lon": -82.5, "size_m": 200,
+    #     "note": "Proposed route",
+    #     "mode": "all"
+    #     #"true_positive_pair_index": 0
+    # },
+    # {
+    #     "name": "Mount Zion Farm",
+    #     "lat": 39.7, "lon": -82.7, "size_m": 200,
+    #     "note": "eyeballed this one",
+    #     "mode": "circleville",
+    # },
+    # {
+    #     "name": "Mount Zion Farm 2",
+    #     "lat": 39.7, "lon": -82.7, "size_m": 200,
+    #     "note": "eyeballed this one too"
+    # },
     {
         "name": "Wilson Road Resivoir",
         "lat": 39.7, "lon": -82.7, "size_m": 200,
@@ -479,13 +517,15 @@ REPORT_COORDS: list = [
         "lat":39.5, "lon": -82.7, "size_m": 200,
         "note": "Very correct looking, but faint, high bank work",
         "mode": "high_banks",
+        "true_positive_pair_index": [0,1]
+
     },
-    {
-        "name": "Rainbow Drive",
-        "lat": 39.7, "lon": -82.6, "size_m": 200,
-        "note": "probably trees",
-        "mode": "high_banks",
-    }
+    # {
+    #     "name": "Rainbow Drive",
+    #     "lat": 39.7, "lon": -82.6, "size_m": 200,
+    #     "note": "probably trees",
+    #     "mode": "high_banks",
+    # }
     # {
     #     "name": "Examine Later 3",
     #     "lat": 39.7, "lon": -82.7, "size_m": 200,

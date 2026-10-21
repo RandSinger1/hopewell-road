@@ -1,596 +1,306 @@
 """
 generate_report_doc.py
-Generates report/KhthonLiDAR_Report.docx for distribution to archaeologists.
+Generates KhthonLiDAR_Results.docx — results section only.
+
+Structure
+---------
+  Results
+    Circleville Leg
+      Table: site names + coordinates
+      Overview map
+      Per site (first occurrence only):
+        pipeline_steps.png          (full 7×2 grid)
+        pipeline_steps/12_detected_pairs.png
+        pipeline_steps/13_hillshade_perp32.png
+    Chillicothe Leg
+      (same; duplicate sites cross-reference first occurrence)
+    High Banks Leg
+      (same)
+
+Figure captions use Word SEQ Figure fields so numbering is maintained
+automatically by Word when the document is opened.  Duplicate sites (mode
+"all") emit a cross-reference paragraph rather than repeating the images.
+
+Usage
+-----
+    # Called automatically by run_report.py after figure generation.
+    # Standalone (generates from whatever is already in report/output/):
+    python -m report.generate_report_doc
 """
 from pathlib import Path
 
 from docx import Document
-from docx.shared import Pt, Inches
+from docx.shared import Pt, Inches, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.oxml import OxmlElement
+from docx.oxml.ns import qn
+
 import parameters
-from .report_utils import site_target_angle
-from utils import make_line, corridor_angle_at
+from .report_utils import site_target_angle, site_paths
 
-OUTPUT_DIR = Path(__file__).parent / "output"
-fig_counter = [0]
+_OUTPUT_DIR = Path(__file__).parent / "output"
 
-# Pipeline-steps detail (section 3.3) walks through the Van Voorhis Wall site
-# specifically, so its target bearing — not a corridor-wide constant — is
-# what the figures it references actually used (see base_compute.get_detection
-# / utils.corridor_mode_and_angle for the mode/parabola logic).
-_VAN_VOORHIS = next(c for c in parameters.REPORT_COORDS if c["name"] == "Van Voorhis Wall")
-_VV_MODE, _VV_ANGLE = site_target_angle(_VAN_VOORHIS)
-_VV_PERP_AZIMUTH = (_VV_ANGLE + 90.0) % 360.0
-
-# Fixed bearings of the two straight-line corridor legs (used in section 4's
-# parameter table). The 'circleville' leg is a parabola, so it has no single
-# bearing — its tangent angle varies continuously (see corridor_mode_and_angle).
-_, _CHILLICOTHE_DERIV = make_line(
-    parameters.CHILLICOTHE_COORD[1], parameters.CHILLICOTHE_COORD[0],
-    parameters.NEWARK_COORD[1], parameters.NEWARK_COORD[0],
-)
-_CHILLICOTHE_BEARING = corridor_angle_at(_CHILLICOTHE_DERIV, parameters.CHILLICOTHE_COORD[1])
-
-_, _HIGH_BANKS_DERIV = make_line(
-    parameters.HIGH_BANKS_COORD[1], parameters.HIGH_BANKS_COORD[0],
-    parameters.NEWARK_COORD[1], parameters.NEWARK_COORD[0],
-)
-_HIGH_BANKS_BEARING = corridor_angle_at(_HIGH_BANKS_DERIV, parameters.HIGH_BANKS_COORD[1])
+_PATH_DISPLAY = {
+    "circleville": "Circleville",
+    "chillicothe": "Chillicothe",
+    "high_banks":  "High Banks",
+}
 
 
-# ── helpers ──────────────────────────────────────────────────────────────────
+# ── Word XML helpers ──────────────────────────────────────────────────────────
 
-def add_heading(doc, text, level=1):
+def _seq_figure_into(paragraph) -> None:
+    """Append 'Figure { SEQ Figure \\* ARABIC }' into paragraph using a fldSimple."""
+    r_pre = paragraph.add_run("Figure ")
+    r_pre.italic = True
+    r_pre.font.size = Pt(9)
+
+    fld = OxmlElement("w:fldSimple")
+    fld.set(qn("w:instr"), " SEQ Figure \\* ARABIC ")
+    r = OxmlElement("w:r")
+    rpr = OxmlElement("w:rPr")
+    i_el = OxmlElement("w:i")
+    sz = OxmlElement("w:sz")
+    sz.set(qn("w:val"), "18")   # 9 pt = 18 half-points
+    rpr.append(i_el)
+    rpr.append(sz)
+    r.append(rpr)
+    t = OxmlElement("w:t")
+    t.text = "0"                # placeholder updated by Word on open
+    r.append(t)
+    fld.append(r)
+    paragraph._p.append(fld)
+
+
+def _bookmark_wrap(paragraph, bm_id: int, name: str) -> None:
+    """Add bookmarkStart + bookmarkEnd around existing paragraph content."""
+    bm_start = OxmlElement("w:bookmarkStart")
+    bm_start.set(qn("w:id"), str(bm_id))
+    bm_start.set(qn("w:name"), name)
+    bm_end = OxmlElement("w:bookmarkEnd")
+    bm_end.set(qn("w:id"), str(bm_id))
+    paragraph._p.insert(0, bm_start)
+    paragraph._p.append(bm_end)
+
+
+# ── document helpers ──────────────────────────────────────────────────────────
+
+def _add_heading(doc, text, level=1):
     doc.add_heading(text, level=level)
 
-def add_para(doc, text, bold=False, italic=False, space_after=6):
-    p = doc.add_paragraph()
-    run = p.add_run(text)
-    run.bold = bold
-    run.italic = italic
-    p.paragraph_format.space_after = Pt(space_after)
-    return p
 
-def add_bullet(doc, text):
-    p = doc.add_paragraph(text, style='List Bullet')
-    p.paragraph_format.space_after = Pt(3)
-
-def add_table(doc, headers, rows):
+def _add_table(doc, headers, rows):
     table = doc.add_table(rows=1 + len(rows), cols=len(headers))
-    table.style = 'Table Grid'
-    hdr_cells = table.rows[0].cells
+    table.style = "Table Grid"
+    hdr = table.rows[0].cells
     for i, h in enumerate(headers):
-        hdr_cells[i].text = h
-        hdr_cells[i].paragraphs[0].runs[0].bold = True
+        hdr[i].text = h
+        hdr[i].paragraphs[0].runs[0].bold = True
     for row_data in rows:
         cells = table.add_row().cells
         for i, val in enumerate(row_data):
             cells[i].text = str(val)
     return table
 
-def add_pipeline_steps_detail(doc, site_dir):
-    """Insert individual pipeline-step images with explanations (Van Voorhis Wall)."""
-    add_heading(doc, "3.3  Processing Pipeline Illustrated: Van Voorhis Wall", level=2)
-    add_para(doc, (
-        "The Van Voorhis Wall site serves as the ground-truth validation case for the "
-        "detection pipeline.  The following panels walk through each of the thirteen "
-        "processing stages in sequence, with the parameter values and algorithmic "
-        "rationale documented for each step."
-    ))
 
-    step_details = [
-        (
-            "01_raw_dtm",
-            "Step 1: Raw DTM Hillshade",
-            (
-                f"A hillshade rendering of the input Digital Terrain Model at 315° (north-west "
-                f"illumination).  The underlying DTM is a raw elevation raster generated by rasterising "
-                f"bare-earth LiDAR returns at {parameters.DTM_RESOLUTION} m/pixel using inverse-distance "
-                f"weighting (IDW) interpolation via PDAL's GDAL writer, then mosaicked and reprojected "
-                f"to WGS 84.  The hillshade is shown here for visual context only; all processing "
-                f"operates on the raw elevation values.  At this stage broadscale terrain trends "
-                f"dominate — earthwork remnants are present but not yet isolated."
-            ),
-        ),
-        (
-            "02_median_smooth",
-            "Step 2: Median-Smoothed DTM Hillshade",
-            (
-                f"A hillshade rendering of the DTM after applying a nodata-aware circular median filter "
-                f"(kernel half-radius {parameters.MEDIAN_SMOOTH_RADIUS} px = {parameters.MEDIAN_SMOOTH_RADIUS} m "
-                f"at 1 m/px).  The median filter suppresses salt-and-pepper noise from residual low "
-                f"vegetation returns.  It is preferred over a Gaussian blur because it preserves sharp "
-                f"edges, critical for not rounding the narrow crests of earthwork embankments.  Nodata "
-                f"cells are excluded from kernel statistics so data boundaries do not bias the output."
-            ),
-        ),
-        (
-            "03_local_relief_model",
-            "Step 3: Local Relief Model (LRM)",
-            (
-                f"A circular neighbourhood surface estimate (half-radius {parameters.LRM_RADIUS} px "
-                f"= {parameters.LRM_RADIUS} m, method: {parameters.LRM_METHOD}) is computed and subtracted "
-                f"from the smoothed DTM.  The result, the Local Relief Model, isolates micro-topographic "
-                f"anomalies within approximately 0.5 m of the local terrain trend, suppressing broadscale "
-                f"hillslopes and valley gradients.  Positive values (warm tones, RdBu_r) indicate local "
-                f"high points; negative values indicate depressions.  Earthwork banks appear as faint "
-                f"positive ribbons where the regional slope has been removed."
-            ),
-        ),
-        (
-            "04_frangi_ridge_response",
-            "Step 4: Frangi Ridge Response",
-            (
-                f"The Frangi vesselness measure (Frangi et al., 1998) is applied to the LRM at scales "
-                f"sigma in {parameters.RIDGE_SCALES} px to detect elongated ridge-like structures across a "
-                f"range of widths.  At each scale, second-order Gaussian derivatives form the 2x2 "
-                f"Hessian matrix of image intensity.  Eigenvalues l1 <= l2 measure curvature: a ridge "
-                f"exists where l1 < 0 (concave across the ridge) and |l2| is approximately 0 (flat along it).  "
-                f"The vesselness score is V(s) = exp(-Rb^2 / 2*b^2) * (1 - exp(-S^2 / 2*c^2)), where "
-                f"Rb = |l1/l2| penalises blob-like structures, S = sqrt(l1^2 + l2^2) reflects overall "
-                f"response strength, b = 0.5, and c is half the 95th percentile of S across the image.  "
-                f"The maximum response across all scales is retained; bright/hot pixels are strong ridge candidates.  "
-                f"For the corridor-wide scan, only sigma = {parameters.SCAN_RIDGE_SCALES[0]} px is used for speed."
-            ),
-        ),
-        (
-            "05_ridge_response",
-            "Step 5: Ridge Amplitude Threshold",
-            (
-                f"The Frangi ridge response map annotated with the amplitude acceptance threshold "
-                f"(t = {parameters.RIDGE_THRESHOLD}, cyan dashed line).  Pixels below this value are "
-                f"discarded from the binary mask regardless of their orientation.  The threshold is "
-                f"intentionally low to favour recall: false positives generated here are removed later "
-                f"by the geometric pairing constraint, whereas a missed true-positive cannot be recovered."
-            ),
-        ),
-        (
-            "06_hessian_orientation",
-            "Step 6: Hessian Orientation",
-            (
-                f"The dominant orientation of the ridge axis at each pixel is estimated from the "
-                f"Hessian eigenvector corresponding to the smaller eigenvalue "
-                f"(computed after Gaussian smoothing at sigma = {parameters.HESSIAN_SIGMA} px).  "
-                f"The orientation lies in [0°, 180°) and is displayed via the cyclic HSV colourmap.  "
-                f"The cyan dashed line on the colourbar marks the target bearing "
-                f"({_VV_ANGLE:.0f}° from the horizontal axis, '{_VV_MODE}' corridor mode).  "
-                f"Only pixels above a low background ridge-response threshold are shown; "
-                f"transparent pixels carry no significant ridge signal."
-            ),
-        ),
-        (
-            "07_angle_deviation",
-            "Step 7: Angle Deviation",
-            (
-                f"For each ridge pixel, the absolute angular difference between its Hessian orientation "
-                f"and the target bearing ({_VV_ANGLE:.0f}°) is computed and folded into "
-                f"[0°, 90°] to respect the 180° ambiguity of orientation.  The RdYlGn_r colourmap "
-                f"maps 0° (perfect alignment) to green and 90° (perpendicular) to red.  "
-                f"The cyan dashed line marks the acceptance threshold of +/-{parameters.ANGLE_TOLERANCE:.0f}°.  "
-                f"In the next step, this orientation filter is combined with the amplitude threshold "
-                f"to produce the initial binary ridge mask."
-            ),
-        ),
-        (
-            "08_binary_mask",
-            "Step 8: Binary Mask",
-            (
-                f"The initial binary ridge mask: all pixels whose Frangi response exceeds the amplitude "
-                f"threshold (t = {parameters.RIDGE_THRESHOLD}) AND whose Hessian orientation deviates no "
-                f"more than ±{parameters.ANGLE_TOLERANCE:.0f}° from the target bearing "
-                f"({_VV_ANGLE:.0f}°) are set to 1.  All other pixels are 0.  "
-                f"This is the raw candidate set prior to any morphological processing.  "
-                f"True earthwork ridges should appear as oriented bright ribbons; isotropic noise, "
-                f"mis-oriented features, and sub-threshold returns are suppressed.  "
-                f"Fragmentation and gaps due to partially-occluded or degraded sections of earthwork "
-                f"are visible at this stage and are addressed in the next step."
-            ),
-        ),
-        (
-            "09_gap_fill",
-            "Step 9: Along-Wall Gap Filling",
-            (
-                f"The binary mask (pixels passing both the amplitude threshold and the orientation filter) "
-                f"is processed by an along-wall integration step to bridge gaps caused by partially "
-                f"occluded or degraded sections of earthwork.  The mask is rotated to align the target "
-                f"wall direction with the image horizontal axis, a uniform filter of width "
-                f"proportional to {parameters.MIN_RIDGE_LENGTH_METERS} m is applied along rows, and the "
-                f"result is rotated back.  A pixel is recovered if the density of wall evidence in its "
-                f"along-wall neighbourhood exceeds {parameters.WALL_FILL_THRESHOLD}.  "
-                f"Isolated components smaller than {parameters.BINARY_MIN_OBJECT_SIZE} px squared are discarded."
-            ),
-        ),
-        (
-            "10_skeleton",
-            "Step 10: Skeleton",
-            (
-                f"The gap-filled binary mask is thinned to a one-pixel-wide medial-axis skeleton "
-                f"(scikit-image medial_axis).  The skeleton collapses ridge width to a single "
-                f"centreline while preserving topological connectivity, enabling accurate endpoint "
-                f"extraction and segment-length measurement.  Segments shorter than "
-                f"{parameters.MIN_RIDGE_LENGTH_METERS} m are discarded as too short to constrain "
-                f"a reliable line orientation."
-            ),
-        ),
-        (
-            "11_labeled_components",
-            "Step 11: Labeled Components",
-            (
-                f"The skeleton is partitioned into connected components using a standard flood-fill.  "
-                f"Each colour represents one candidate ridge segment.  The component count shown in "
-                f"the panel title is the number of segments that proceed to straight-line fitting."
-            ),
-        ),
-        (
-            "12_detected_pairs",
-            "Step 12: Detected Pairs",
-            (
-                f"Each skeleton component is fitted with a straight line by total-least-squares "
-                f"regression (cv2.fitLine).  All pairs of fitted lines are then tested against the "
-                f"expected Hopewell Road geometry: (i) angular difference <= {parameters.PAIRING_ANGLE_TOLERANCE_DEG}°; "
-                f"(ii) perpendicular separation within +/-{int(parameters.SPACING_TOLERANCE*100)}% of "
-                f"{parameters.SPACING_METERS} m "
-                f"({parameters.SPACING_METERS*(1-parameters.SPACING_TOLERANCE):.0f}-"
-                f"{parameters.SPACING_METERS*(1+parameters.SPACING_TOLERANCE):.0f} m); "
-                f"(iii) longitudinal overlap >= {int(parameters.OVERLAP_RATIO*100)}% of the shorter "
-                f"segment's length.  Accepted pairs are overlaid on the raw DTM hillshade "
-                f"(red and blue lines) with inter-wall spacing annotated in metres."
-            ),
-        ),
-        (
-            "13_hillshade_perp32",
-            f"Visual Diagnostic: Hillshade Perpendicular to {_VV_ANGLE:.0f}°",
-            (
-                f"A directional hillshade with illumination from azimuth {_VV_PERP_AZIMUTH:.0f}° "
-                f"(perpendicular to the expected {_VV_ANGLE:.0f}° corridor bearing at this site), "
-                f"solar elevation 20°, and "
-                f"vertical exaggeration z = 4.  This panel is not part of the processing pipeline; "
-                f"it is computed from the smoothed DTM for visual confirmation that the expected "
-                f"earthwork ridges are present and oriented correctly before the algorithm is applied."
-            ),
-        ),
-    ]
+def _add_figure(doc, img_path, caption: str,
+                width=Inches(5.8), bm_state: list | None = None,
+                bm_name: str | None = None) -> bool:
+    """
+    Insert image + Word SEQ Figure caption.  Returns True if inserted.
 
-    for slug, heading, body in step_details:
-        add_heading(doc, heading, level=3)
-        add_para(doc, body)
-        add_figure(
-            doc,
-            site_dir / "pipeline_steps" / f"{slug}.png",
-            heading,
-            width=Inches(5.0),
-        )
-
-
-def add_figure(doc, img_path, caption, width=Inches(5.8)):
-    """Insert an image with a centred italic caption. Skips silently if missing."""
+    bm_state : [next_id]  — mutable counter shared across the document
+    bm_name  : if given, the caption paragraph gets a bookmark with this name
+                so it can be cross-referenced from duplicate-site paragraphs.
+    """
     if not Path(img_path).exists():
-        return
-    fig_counter[0] += 1
+        print(f"    [report] missing figure — skipped: {img_path}")
+        return False
+
+    # Image paragraph
     p = doc.add_paragraph()
     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    run = p.add_run()
-    run.add_picture(str(img_path), width=width)
+    p.add_run().add_picture(str(img_path), width=width)
+
+    # Caption paragraph
     cap = doc.add_paragraph()
     cap.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    run2 = cap.add_run(f"Figure {fig_counter[0]}.  {caption}")
+    cap.paragraph_format.space_after = Pt(10)
+
+    _seq_figure_into(cap)
+
+    r_tail = cap.add_run(f".  {caption}")
+    r_tail.italic = True
+    r_tail.font.size = Pt(9)
+
+    if bm_name and bm_state is not None:
+        bm_id = bm_state[0]
+        bm_state[0] += 1
+        _bookmark_wrap(cap, bm_id, bm_name)
+
+    return True
+
+
+def _add_duplicate_note(doc, site_name: str, first_path_display: str,
+                         this_path_display: str) -> None:
+    """
+    Emit a note that this site's figures already appear in another section.
+    """
+    p = doc.add_paragraph()
+    p.paragraph_format.space_after = Pt(8)
+    run = p.add_run(
+        f"{site_name.replace('_', ' ')} was first analyzed in the "
+        f"{first_path_display} section; see the figures there for the "
+        f"detection pipeline visualizations. "
+        f"(Note: the {this_path_display} corridor uses a different target "
+        f"azimuth — re-run with ––only “{site_name}” "
+        f"to generate path-specific figures for this section.)"
+    )
+    run.italic = True
+    run.font.size = Pt(9)
+    run.font.color.rgb = RGBColor(0x77, 0x77, 0x77)
+
+
+# ── main entry point ──────────────────────────────────────────────────────────
+
+def generate_report_doc(paths_and_coords: dict,
+                         fig_base_dir: Path | None = None) -> None:
+    """
+    Generate KhthonLiDAR_Results.docx.
+
+    Parameters
+    ----------
+    paths_and_coords : {path_name: [coord, ...], ...}
+        Coords should already have "mode" forced to path_name so
+        site_target_angle() returns the path-specific azimuth.
+    fig_base_dir : root of per-path figure trees (default: report/output/)
+        Layout expected: fig_base_dir / path_name / site_name / ...
+    """
+    fig_base_dir = Path(fig_base_dir) if fig_base_dir else _OUTPUT_DIR
+    bm_state = [0]           # [next_bookmark_id] — unique across the document
+    seen_sites: dict[str, str] = {}   # {site_name: first_path_display}
+
+    doc = Document()
+    for section in doc.sections:
+        section.top_margin    = Inches(1.0)
+        section.bottom_margin = Inches(1.0)
+        section.left_margin   = Inches(1.25)
+        section.right_margin  = Inches(1.25)
+
+    # Title block
+    title = doc.add_paragraph()
+    title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = title.add_run(
+        "Automated Detection of Hopewell Earthwork Remnants\nUsing Airborne LiDAR"
+    )
+    run.bold = True
+    run.font.size = Pt(16)
+    title.paragraph_format.space_after = Pt(4)
+
+    sub = doc.add_paragraph()
+    sub.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run2 = sub.add_run("KhthonLiDAR Project  ·  Results")
     run2.italic = True
-    run2.font.size = Pt(9)
-    cap.paragraph_format.space_after = Pt(12)
+    run2.font.size = Pt(11)
+    sub.paragraph_format.space_after = Pt(16)
+    doc.add_paragraph()
 
+    # ── Results ───────────────────────────────────────────────────────────────
+    _add_heading(doc, "5.  Results", level=1)
 
-# ── build document ────────────────────────────────────────────────────────────
+    for sub_i, (path_name, coords) in enumerate(paths_and_coords.items(), start=1):
+        display = _PATH_DISPLAY.get(path_name, path_name.replace("_", " ").title())
+        path_dir = fig_base_dir / path_name
 
-doc = Document()
+        _add_heading(doc, f"5.{sub_i}  {display}", level=2)
 
-for section in doc.sections:
-    section.top_margin    = Inches(1.0)
-    section.bottom_margin = Inches(1.0)
-    section.left_margin   = Inches(1.25)
-    section.right_margin  = Inches(1.25)
+        # Coord table (north → south)
+        sorted_coords = sorted(coords, key=lambda c: c["lat"], reverse=True)
+        rows = [
+            (c["name"],
+             f"{c['lat']:.4f}° N,  {c['lon']:.4f}° W",
+             c.get("note", ""))
+            for c in sorted_coords
+        ]
+        _add_table(doc, ["Site", "Coordinates (WGS 84)", "Notes"], rows)
+        doc.add_paragraph()
 
-# Title
-title = doc.add_paragraph()
-title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-run = title.add_run("Automated Detection of Hopewell Earthwork Remnants\nUsing Airborne LiDAR")
-run.bold = True
-run.font.size = Pt(16)
-title.paragraph_format.space_after = Pt(4)
-
-subtitle = doc.add_paragraph()
-subtitle.alignment = WD_ALIGN_PARAGRAPH.CENTER
-run2 = subtitle.add_run("KhthonLiDAR Project  ·  Preliminary Technical Report")
-run2.italic = True
-run2.font.size = Pt(11)
-subtitle.paragraph_format.space_after = Pt(16)
-doc.add_paragraph()
-
-
-# ── 1. Introduction ───────────────────────────────────────────────────────────
-
-add_heading(doc, "1.  Introduction", level=1)
-add_para(doc, (
-    "Archeologists have hypothesized the Great Hopewell was a route of the Hopewell "
-    "culture (c. 100 BCE – 500 CE).  The Hopewell built extensive earthwork complexes, "
-    "much of which have been obscured by modern agriculture, vegetation, and development.  "
-    "Many sections of these earthworks are no longer visible at the surface and have "
-    "not been systematically surveyed."
-))
-add_para(doc, (
-    "This project applies automated analysis of high-resolution airborne LiDAR data "
-    "to detect candidate remnants of these earthwork pairs along the corridor between "
-    "Chillicothe and Newark, Ohio.  The approach targets the characteristic morphological "
-    "signature of Hopewell Road earthworks: two parallel low-relief linear ridges "
-    "approximately 32–48 m apart, oriented along the road bearing, and visible as "
-    "subtle positive anomalies in the ground surface when regional slope is removed."
-))
-
-
-# ── 2. Data ───────────────────────────────────────────────────────────────────
-
-add_heading(doc, "2.  Data", level=1)
-add_para(doc, (
-    "Airborne LiDAR point-cloud data were obtained from the U.S. Geological Survey "
-    "National Map (3DEP programme) for the Ohio Statewide Phase 2 collection (2020). "
-    "The data have a nominal ground-point density of approximately 8 points/m² "
-    "and were acquired with last-return and single-return filters to preferentially "
-    "capture bare-earth returns.  Tiles were downloaded in LAZ format directly from "
-    "the USGS RockyWeb delivery service."
-))
-add_para(doc, (
-    f"The study area encompasses the triangle with vertices at Newark "
-    f"({parameters.NEWARK_COORD[0]}, {parameters.NEWARK_COORD[1]}), "
-    f"Chillicothe ({parameters.CHILLICOTHE_COORD[0]}, {parameters.CHILLICOTHE_COORD[1]}), "
-    f"and Circleville ({parameters.CIRCLEVILLE_COORD[0]}, {parameters.CIRCLEVILLE_COORD[1]}).  "
-    f"The search corridor is defined by a parabola y = a*(x-x0)^2 + b*(x-x0) + c "
-    f"anchored at Circleville (x0 = {parameters.PARABOLA_X_OFFSET}, c = {parameters.PARABOLA_C}) "
-    f"with coefficients a = {parameters.PARABOLA_A} and b = {parameters.PARABOLA_B}, "
-    f"chosen so the curve passes through Newark at the expected corridor bearing.  "
-    f"Tiles are included if their centre falls within {parameters.CORRIDOR_HALF_WIDTH_M/1000:.1f} km "
-    f"({parameters.CORRIDOR_HALF_WIDTH_M:,.0f} m) of this centreline."
-))
-add_para(doc, (
-    "The corridor is not a single straight line, so neither is the expected wall bearing: "
-    "three named segments radiate south from Newark — the Circleville leg (the parabola above, "
-    "whose tangent direction varies continuously along its length), and two straight legs to "
-    f"Chillicothe ({parameters.CHILLICOTHE_COORD[0]}, {parameters.CHILLICOTHE_COORD[1]}) and "
-    f"High Banks ({parameters.HIGH_BANKS_COORD[0]}, {parameters.HIGH_BANKS_COORD[1]}), each with "
-    "one fixed bearing along its length.  For each site in this report, the segment passing "
-    "closest to it determines its locally expected wall bearing, which is then used both as the "
-    "orientation target for Hessian ridge filtering (section 3.3, step 6) and as the road bearing "
-    "for perpendicular cross-section sampling (section 5).  Sites near Newark, where all three "
-    f"segments converge, resolve to approximately the same bearing (~{_VV_ANGLE:.0f}°); sites "
-    "further south diverge depending on which leg they sit nearest."
-))
-
-
-# ── 3. Methodology ────────────────────────────────────────────────────────────
-
-add_heading(doc, "3.  Methodology", level=1)
-add_para(doc, (
-    "The detection pipeline proceeds in three broad stages: point-cloud preparation "
-    "(section 3.1), DTM generation (section 3.2), and image-space processing from "
-    "topographic pre-processing through to parallel-wall detection (section 3.3).  "
-    "Section 3.3 illustrates each image-space step in sequence using the Van Voorhis Wall "
-    "confirmed earthwork site as a ground-truth example.  All tunable parameters are "
-    "tabulated in Section 4.  Candidate detections across all sites are presented in Section 5."
-))
-
-# 3.1
-add_heading(doc, "3.1  Point-Cloud Preparation", level=2)
-add_para(doc, "Each LAZ tile was processed through a PDAL pipeline comprising three steps:")
-add_bullet(doc, (
-    "Statistical outlier removal (filters.outlier):  Points whose distance from "
-    f"the local mean of their {parameters.OUTLIER_MEAN_K} nearest neighbours exceeded "
-    f"{parameters.OUTLIER_MULTIPLIER} standard deviations were flagged as noise and discarded."
-))
-add_bullet(doc, (
-    "Ground classification (filters.smrf):  The Simple Morphological Filter "
-    f"(Pingel et al., 2013) was applied with a maximum window radius of "
-    f"{parameters.SMRF_WINDOW} m and a slope tolerance of {parameters.SMRF_SLOPE} m/m "
-    "to classify returns as ground or non-ground.  Only last returns and single "
-    "returns were considered, reducing the influence of canopy returns."
-))
-add_bullet(doc, (
-    "Ground extraction:  Non-ground returns were discarded.  The resulting "
-    "ground-only point cloud was re-saved in compressed LAS format."
-))
-
-# 3.2
-add_heading(doc, "3.2  Digital Terrain Model Generation", level=2)
-add_para(doc, (
-    f"Ground point clouds were rasterised to Digital Terrain Models (DTMs) at "
-    f"{parameters.DTM_RESOLUTION} m/pixel using inverse-distance weighting (IDW) "
-    "interpolation via PDAL's GDAL writer.  Individual tile DTMs were then "
-    "mosaicked and reprojected to WGS 84 (EPSG:4326) using GDAL Warp with "
-    "bilinear resampling, preserving the native ground resolution in degrees per pixel."
-))
-
-add_pipeline_steps_detail(doc, OUTPUT_DIR / "Van Voorhis Wall")
-
-add_para(doc, (
-    f"For the corridor-wide scan, the full pipeline was applied in a tiled grid across "
-    f"the study polygon using {parameters.SCAN_TILE_SIZE_M} m x {parameters.SCAN_TILE_SIZE_M} m "
-    f"windows with {parameters.SCAN_OVERLAP_M} m overlap to avoid missing earthworks that "
-    f"straddle tile boundaries."
-))
-
-
-# ── 4. Parameters ─────────────────────────────────────────────────────────────
-
-add_heading(doc, "4.  Key Parameters", level=1)
-add_para(doc, "All parameters used in the analysis are summarised below.")
-param_rows = [
-    ("DTM resolution",           f"{parameters.DTM_RESOLUTION} m/pixel"),
-    ("Median smooth radius",     f"{parameters.MEDIAN_SMOOTH_RADIUS} px ({2*parameters.MEDIAN_SMOOTH_RADIUS+1}×{2*parameters.MEDIAN_SMOOTH_RADIUS+1} kernel)"),
-    ("LRM radius",               f"{parameters.LRM_RADIUS} px ({2*parameters.LRM_RADIUS+1} m)"),
-    ("Frangi scales (σ)",        str(parameters.RIDGE_SCALES) + " px"),
-    ("Frangi threshold",         str(parameters.RIDGE_THRESHOLD)),
-    ("Hessian orientation σ",    f"{parameters.HESSIAN_SIGMA} px"),
-    ("Orientation tolerance",    f"±{parameters.ANGLE_TOLERANCE}°"),
-    ("Expected wall bearing (near Newark)", f"{parameters.ROAD_BEARING_DEG}° from north"),
-    ("Morph. closing radius",    f"{int(parameters.MORPH_DISK_RADIUS)} px"),
-    ("Min. component size",      f"{parameters.BINARY_MIN_OBJECT_SIZE} px²"),
-    ("Min. ridge length",        f"{parameters.MIN_RIDGE_LENGTH_METERS} m"),
-    ("Expected wall spacing",    f"{parameters.SPACING_METERS} m"),
-    ("Spacing tolerance",        f"±{int(parameters.SPACING_TOLERANCE*100)}%"),
-    ("Pairing angle tolerance",  f"±{parameters.PAIRING_ANGLE_TOLERANCE_DEG}°"),
-    ("Min. overlap ratio",       f"{int(parameters.OVERLAP_RATIO*100)}%"),
-    # ── Corridor / search geometry ─────────────────────────────────────────────
-    ("Circleville anchor (lat, lon)", f"{parameters.CIRCLEVILLE_COORD[0]}, {parameters.CIRCLEVILLE_COORD[1]}"),
-    ("Newark anchor (lat, lon)",      f"{parameters.NEWARK_COORD[0]}, {parameters.NEWARK_COORD[1]}"),
-    ("Chillicothe anchor (lat, lon)", f"{parameters.CHILLICOTHE_COORD[0]}, {parameters.CHILLICOTHE_COORD[1]}"),
-    ("High Banks anchor (lat, lon)",  f"{parameters.HIGH_BANKS_COORD[0]}, {parameters.HIGH_BANKS_COORD[1]}"),
-    ("Corridor mode: circleville (parabola, Circleville↔Newark)",
-     f"y = {parameters.PARABOLA_A}*(x - {parameters.PARABOLA_X_OFFSET})^2 "
-     f"+ {parameters.PARABOLA_B}*(x - {parameters.PARABOLA_X_OFFSET}) "
-     f"+ {parameters.PARABOLA_C}  (tangent angle varies along curve)"),
-    ("Corridor mode: chillicothe (line, Chillicothe↔Newark)",
-     f"fixed bearing {_CHILLICOTHE_BEARING:.1f}° from north"),
-    ("Corridor mode: high_banks (line, High Banks↔Newark)",
-     f"fixed bearing {_HIGH_BANKS_BEARING:.1f}° from north"),
-    ("Corridor half-width (search dist.)", f"{parameters.CORRIDOR_HALF_WIDTH_M:,.0f} m ({parameters.CORRIDOR_HALF_WIDTH_M/1000:.1f} km)"),
-]
-add_table(doc, ["Parameter", "Value"], param_rows)
-doc.add_paragraph()
-
-
-# ── 5. Results ────────────────────────────────────────────────────────────────
-
-add_heading(doc, "5.  Results", level=1)
-add_para(doc, (
-    "The following locations returned positive detections and are recommended "
-    "for ground-truth survey.  The Van Voorhis Wall site is a confirmed Hopewell "
-    "earthwork and serves as the validation baseline.  Sites are ordered north to "
-    "south by latitude.  For each site, a corridor overview map shows its position "
-    "and detected wall bearing relative to the full Newark-Chillicothe corridor, "
-    "followed by a multi-azimuth hillshade, perpendicular elevation profiles through "
-    "the detected wall pairs, and the combined pipeline figure."
-))
-
-# Summary table — north to south
-_sorted_coords = sorted(parameters.REPORT_COORDS, key=lambda c: c["lat"], reverse=True)
-site_rows = [(c["name"], f"{c['lat']:.4f}° N,  {c['lon']:.4f}° W", c.get("note", ""))
-             for c in _sorted_coords]
-add_table(doc, ["Site", "Coordinates (WGS 84)", "Notes"], site_rows)
-doc.add_paragraph()
-
-# Per-site images — north to south
-for i, coord in enumerate(_sorted_coords, start=1):
-    name = coord["name"]
-    site_dir = OUTPUT_DIR / name
-
-    site_mode, site_angle = site_target_angle(coord)
-    add_heading(doc, f"5.{i}  {name}", level=2)
-    add_para(doc, (
-        f"Location: {coord['lat']:.4f}° N, {coord['lon']:.4f}° W.  "
-        f"Corridor mode: {site_mode} (target bearing {site_angle:.1f}°).  "
-        f"{coord.get('note', '')}"
-    ))
-
-    add_figure(
-        doc,
-        OUTPUT_DIR / f"overview_{name}.png",
-        f"{name}: corridor overview map.  The highlighted line shows the detected "
-        "wall bearing at this site (gold = detection confirmed; red = corridor "
-        "fallback bearing used).  Other sites are dimmed for context.  The dashed "
-        "blue line is the Newark-Chillicothe azimuth.",
-        width=Inches(5.0),
-    )
-
-    add_figure(
-        doc,
-        site_dir / "multi_azimuth_hillshade.png",
-        f"{name}: multi-azimuth hillshade.  Each panel uses a different illumination "
-        "direction (315°, 45°, 135°, 225°) to reveal linear earthwork features that "
-        "may be invisible under a single lighting angle.",
-    )
-
-    # Prefer detected_pair_profiles; fall back to cross_sections
-    profiles_img = site_dir / "detected_pair_profiles.png"
-    cross_img    = site_dir / "cross_sections.png"
-    if profiles_img.exists():
-        add_figure(
+        # Overview map for this path
+        _add_figure(
             doc,
-            profiles_img,
-            f"{name}: perpendicular elevation profiles through each detected wall pair.  "
-            "Dotted vertical lines mark the actual detected wall positions.  "
-            "The right panel shows de-trended profiles with regional slope removed; "
-            "a twin-peak pattern at the expected spacing is characteristic of Hopewell earthworks.",
-        )
-    elif cross_img.exists():
-        add_figure(
-            doc,
-            cross_img,
-            f"{name}: perpendicular cross-sections through the detected wall pair.",
+            path_dir / "overview_map.png",
+            f"{display}: corridor overview map showing detected wall bearings at each site.",
+            width=Inches(5.5),
+            bm_state=bm_state,
         )
 
-    add_figure(
-        doc,
-        site_dir / "pipeline_steps.png",
-        f"{name}: processing pipeline (2 rows x 7 panels).  "
-        "Top row (left to right): raw DTM hillshade, median-smoothed DTM hillshade, "
-        "Local Relief Model, Frangi multi-scale ridge response, "
-        "Frangi response with amplitude threshold, Hessian ridge orientation, "
-        "angle deviation from target bearing.  "
-        "Bottom row: initial binary mask (amplitude + orientation filter), "
-        "along-wall gap-filled binary mask, medial-axis skeleton, labelled skeleton components, "
-        f"detected parallel wall pairs, hillshade perpendicular to this site's "
-        f"{site_angle:.0f}° target bearing (visual diagnostic).",
-    )
+        # Per-site figures
+        for coord in sorted_coords:
+            name = coord["name"]
+            site_dir = path_dir / name
+            _, target_angle = site_target_angle(coord)
+
+            _add_heading(doc, name.replace("_", " "), level=3)
+
+            if name in seen_sites:
+                _add_duplicate_note(doc, name, seen_sites[name], display)
+                continue
+
+            # Unique slug prefix so bookmarks don't collide if the same figure
+            # name appears across different paths (they're the same site but
+            # different analyses; bookmarks are placed on the first occurrence).
+            bm_prefix = f"fig_{name}"
+
+            inserted_any = False
+            inserted_any |= _add_figure(
+                doc,
+                site_dir / "pipeline_steps.png",
+                f"{name}: full detection pipeline (7×2 panels). "
+                f"Target bearing {target_angle:.0f}°.",
+                bm_state=bm_state,
+                bm_name=f"{bm_prefix}_pipeline",
+            )
+            inserted_any |= _add_figure(
+                doc,
+                site_dir / "pipeline_steps" / "12_detected_pairs.png",
+                f"{name}: detected parallel wall pairs overlaid on raw DTM. "
+                f"Pair spacing labelled in metres.",
+                width=Inches(4.5),
+                bm_state=bm_state,
+                bm_name=f"{bm_prefix}_pairs",
+            )
+            inserted_any |= _add_figure(
+                doc,
+                site_dir / "pipeline_steps" / "13_hillshade_perp32.png",
+                f"{name}: hillshade illuminated perpendicular to the "
+                f"{target_angle:.0f}° corridor bearing — visual "
+                f"confirmation of earthwork ridge orientation.",
+                width=Inches(4.5),
+                bm_state=bm_state,
+                bm_name=f"{bm_prefix}_hillshade",
+            )
+
+            if inserted_any:
+                seen_sites[name] = display
+
+    # ── Save ──────────────────────────────────────────────────────────────────
+    out = Path(__file__).parent / "KhthonLiDAR_Results.docx"
+    doc.save(out)
+    n_bm = bm_state[0]
+    print(f"Saved: {out}  ({n_bm} bookmarked figure captions, "
+          f"{len(seen_sites)} unique sites)")
 
 
-# ── 6. Limitations ────────────────────────────────────────────────────────────
-
-add_heading(doc, "6.  Limitations and Next Steps", level=1)
-add_para(doc, "The automated method has several limitations that field survey would address:")
-add_bullet(doc, (
-    f"The orientation and spacing filters are tuned to the Hopewell Road corridor "
-    f"bearing.  Segments deviating more than ±{parameters.ANGLE_TOLERANCE}° from the "
-    "expected bearing will be suppressed."
-))
-add_bullet(doc, (
-    "Linear agricultural features (field drainage ditches, hedgerow banks) "
-    "oriented near the corridor bearing generate false positives.  "
-    "Candidate sites should be cross-checked against cadastral boundaries and "
-    "historical aerial photography."
-))
-add_bullet(doc, (
-    "Ground-truth survey at each candidate site is required to confirm "
-    "archaeological significance before any further interpretation."
-))
-add_bullet(doc, (
-    "Most candidate remnants are false positives.  Roads, rivers, and agricultural "
-    "features are incorrectly identified by the model.  Visual confirmation of candidate "
-    "remnants by the human eye is required.  Future work should explore identifying "
-    "remnants with only one of the two parallel lines.  Such an approach will produce "
-    "significantly more false positives.  To mitigate them, ridge width should be "
-    "included as a candidate requirement."
-))
-
-
-# ── 7. References ─────────────────────────────────────────────────────────────
-
-add_heading(doc, "7.  References", level=1)
-refs = [
-    ("Frangi, A. F., Niessen, W. J., Vincken, K. L., & Viergever, M. A. (1998). "
-     "Multiscale vessel enhancement filtering. "
-     "Medical Image Computing and Computer-Assisted Intervention, 130–137."),
-    ("Pingel, T. J., Clarke, K. C., & McBride, W. A. (2013). "
-     "An improved simple morphological filter for the terrain classification of "
-     "airborne LiDAR data. "
-     "ISPRS Journal of Photogrammetry and Remote Sensing, 77, 21–30."),
-    ("U.S. Geological Survey (2020). "
-     "Ohio Statewide LiDAR Phase 2 (3DEP).  "
-     "National Map 3D Elevation Programme."),
-]
-for r in refs:
-    p = doc.add_paragraph(r, style='List Number')
-    p.paragraph_format.space_after = Pt(4)
-
-
-# ── save ──────────────────────────────────────────────────────────────────────
-
-out = Path(__file__).parent / "KhthonLiDAR_Report.docx"
-doc.save(out)
-print(f"Saved: {out}  ({fig_counter[0]} figures)")
+if __name__ == "__main__":
+    # Build from whatever figures are already on disk
+    all_coords = parameters.REPORT_COORDS
+    paths_and_coords = {}
+    for path_name in ( "chillicothe", "circleville", "high_banks"):
+        path_coords = [
+            {**c, "mode": path_name}
+            for c in all_coords
+            if path_name in site_paths(c)
+        ]
+        if path_coords:
+            paths_and_coords[path_name] = path_coords
+    generate_report_doc(paths_and_coords)

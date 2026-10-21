@@ -2,7 +2,8 @@
 run_pipeline.py — Full LiDAR pipeline in one shot.
 
 Steps:
-  1. collect_images  — fetch tile metadata from the USGS/OGRIP API
+  1. collect_images  — fetch tile metadata from USGS ScienceBase; drop
+                       tiles superseded by newer collections
   2. generate_tiles  — download raw LAZ tiles in parallel
   3. pdal_pipeline   — denoise, ground-classify, rasterise; merge all DTMs
   4. quick_view      — save a preview image of the merged DTM
@@ -75,10 +76,10 @@ def _year_of(sub_area: str) -> str | None:
 
 # ── pipeline steps ────────────────────────────────────────────────────────────
 
-def step_collect(area: str, n_splits: int) -> list[str]:
+def step_collect(area: str, n_splits: int, keep_superseded: bool | None = None) -> list[str]:
     print(f"\n=== Step 1 — collect images [{area}] ===")
     print(f"  Fetching metadata for {area} …")
-    return _collect_images(area, n_splits=n_splits)
+    return _collect_images(area, n_splits=n_splits, keep_superseded=keep_superseded)
 
 
 def step_generate(sub_areas: list[str], max_workers: int = 4):
@@ -104,9 +105,6 @@ def step_pdal(sub_areas: list[str], max_workers: int = 5):
 
 def step_merge(areas: list[str], sub_areas: list[str], separate_year: bool, workers: int = 1):
     print("\n=== Step 4 — merge DTMs ===")
-    if len(sub_areas) <= 1:
-        print("  Only one sub-area — skipping merge.")
-        return
 
     out_dir = _merged_output_dir(areas)
 
@@ -182,8 +180,13 @@ def main():
         help="Produce a separate merged DTM per year (e.g. Hart_Island 2014, 2015, …)",
     )
     parser.add_argument(
-        "--area-splits", type=int, default=15, metavar="N",
+        "--area-splits", type=int, default=1, metavar="N",
         help="Sub-segments to split road-type polygons into (default 10)",
+    )
+    parser.add_argument(
+        "--keep-superseded", action="store_true",
+        help="Keep tiles from older collections even where newer ones cover them "
+             "(use for multi-year areas like Hart_Island)",
     )
     parser.add_argument(
         "--skip-collect", action="store_true",
@@ -210,8 +213,8 @@ def main():
         help="Parallel download threads (default 4)",
     )
     parser.add_argument(
-        "--pdal-workers", type=int, default=5,
-        help="Parallel PDAL processes (default 5)",
+        "--pdal-workers", type=int, default=10,
+        help="Parallel PDAL processes (default 10)",
     )
     parser.add_argument(
         "--sample-step", type=int, default=1000,
@@ -228,7 +231,8 @@ def main():
     all_sub_areas: list[str] = []
     if not args.skip_collect:
         for area in areas:
-            all_sub_areas.extend(step_collect(area, args.area_splits))
+            all_sub_areas.extend(step_collect(area, args.area_splits,
+                                              keep_superseded=args.keep_superseded or None))
     else:
         for area in areas:
             all_sub_areas.extend(_discover_sub_areas(area))

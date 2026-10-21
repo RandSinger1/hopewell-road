@@ -1,24 +1,16 @@
 """
 pipeline_steps.py  —  Step-by-step processing pipeline figure.
 
-Produces a 2-row × 5-column figure showing every stage from raw DTM to
+Produces a 4-row × 3-column figure showing every stage from raw DTM to
 detected parallel wall pairs.
 
-Row 1 — Pre-processing → amplitude gate
-  [1] Raw DTM (hillshaded)
-  [2] Median-smoothed DTM
-  [3] Local Relief Model (LRM)
-  [4] Multi-scale Frangi ridge response
-  [5] Ridge amplitude threshold
-  [6] Hessian orientation
+Row 0: [1] Raw DTM       [2] Median smooth   [3] LRM
+Row 1: [4] Frangi        [5] Ridge amplitude [6] Hessian orient.
+Row 2: [7] Angle dev.    [8] Binary mask     [9] Gap fill
+Row 3: [10] Skeleton     [11] Components     [12] Detected pairs
 
-Row 2 — Orientation filter → binary → skeleton → pairs + diagnostic
-  [7] Angle deviation map
-  [8] Along-wall gap fill
-  [9] Skeleton
-  [10] Labelled skeleton components
-  [11] Detected parallel wall pairs
-  [12] Hillshade perpendicular to 32° (visual diagnostic)
+Panel 13 (hillshade ⊥ target bearing) is saved separately to
+pipeline_steps/13_hillshade_perp32.png but excluded from the main grid.
 
 Call generate_pipeline_figure(coord, dtm_path, output_dir) from run_report.py.
 """
@@ -53,23 +45,21 @@ _STEP_LABELS = [
     "13. Hillshade ⊥ 32°",
 ]
 
-# Slugs follow flat axis order (left-to-right, top-to-bottom in a 2×7 grid).
-# None marks the unused last cell in row 1.
+# Slugs follow flat axis order (left-to-right, top-to-bottom in a 4×3 grid).
+# Panel 13 (hillshade_perp32) is saved separately, not in the grid.
 _STEP_SLUGS = [
     "01_raw_dtm",               # [0,0]
     "02_median_smooth",         # [0,1]
     "03_local_relief_model",    # [0,2]
-    "04_frangi_ridge_response", # [0,3]
-    "05_ridge_response",        # [0,4] — amplitude threshold
-    "06_hessian_orientation",   # [0,5]
-    "07_angle_deviation",       # [0,6] — moved to complete row 0
-    "08_binary_mask",           # [1,0] — NEW
-    "09_gap_fill",              # [1,1]
-    "10_skeleton",              # [1,2]
-    "11_labeled_components",    # [1,3]
-    "12_detected_pairs",        # [1,4]
-    "13_hillshade_perp32",      # [1,5]
-    None,                       # [1,6] — empty cell
+    "04_frangi_ridge_response", # [1,0]
+    "05_ridge_response",        # [1,1] — amplitude threshold
+    "06_hessian_orientation",   # [1,2]
+    "07_angle_deviation",       # [2,0]
+    "08_binary_mask",           # [2,1]
+    "09_gap_fill",              # [2,2]
+    "10_skeleton",              # [3,0]
+    "11_labeled_components",    # [3,1]
+    "12_detected_pairs",        # [3,2]
 ]
 
 
@@ -118,9 +108,9 @@ def generate_pipeline_figure(coord: dict, dtm_path: str, output_dir: Path,
     target_angle, mode = det["target_angle"], det["mode"]
     nd_mask = raw == nodata
 
-    # ── Build figure  (2 rows × 7 columns) ───────────────────────────────────
+    # ── Build figure  (4 rows × 3 columns) ───────────────────────────────────
     print(f"  [pipeline] composing figure …")
-    fig, axes = plt.subplots(2, 7, figsize=(30, 9))
+    fig, axes = plt.subplots(4, 3, figsize=(20, 22))
     fig.patch.set_facecolor("#1a1a1a")
     fig.suptitle(
         f"LiDAR Processing Pipeline  ·  {name.replace('_', ' ')}  "
@@ -157,7 +147,7 @@ def generate_pipeline_figure(coord: dict, dtm_path: str, output_dir: Path,
         _ax_colorbars[ax] = cb
         return cb
 
-    # ── Row 1: pre-processing → amplitude gate → orientation ─────────────────
+    # ── Rows 0-3, cols 0-2: panels in reading order (left→right, top→bottom) ─────
     axes[0, 0].imshow(hs_raw,    origin="upper", extent=ext, aspect="auto")
     style_axes(axes[0, 0], "1. Raw DTM")
     axes[0, 0].set_xticks([]); axes[0, 0].set_yticks([])
@@ -172,50 +162,49 @@ def generate_pipeline_figure(coord: dict, dtm_path: str, output_dir: Path,
     axes[0, 2].set_xticks([]); axes[0, 2].set_yticks([])
 
     ridge_disp = np.where(ridge == nodata, np.nan, ridge)
-    _cb(axes[0, 3], axes[0, 3].imshow(ridge_disp, origin="upper", cmap="hot",
+    _cb(axes[1, 0], axes[1, 0].imshow(ridge_disp, origin="upper", cmap="hot",
                                        extent=ext, aspect="auto"))
-    style_axes(axes[0, 3], "4. Frangi Ridge Response")
-    axes[0, 3].set_xticks([]); axes[0, 3].set_yticks([])
+    style_axes(axes[1, 0], "4. Frangi Ridge Response")
+    axes[1, 0].set_xticks([]); axes[1, 0].set_yticks([])
 
     ridge_thresh_disp = np.where(nd_mask, np.nan, valid_ridge)
-    cb_rt = _cb(axes[0, 4], axes[0, 4].imshow(ridge_thresh_disp, origin="upper", cmap="hot",
+    cb_rt = _cb(axes[1, 1], axes[1, 1].imshow(ridge_thresh_disp, origin="upper", cmap="hot",
                                                 extent=ext, aspect="auto"))
     cb_rt.ax.axhline(cfg.RIDGE_THRESHOLD, color="cyan", linewidth=1.5, linestyle="--")
     cb_rt.ax.annotate(f"t={cfg.RIDGE_THRESHOLD}", xy=(1.05, cfg.RIDGE_THRESHOLD),
                       xycoords=("axes fraction", "data"), fontsize=5, color="cyan", va="center")
-    style_axes(axes[0, 4], f"5. Ridge Amplitude Threshold  (t={cfg.RIDGE_THRESHOLD})")
-    axes[0, 4].set_xticks([]); axes[0, 4].set_yticks([])
+    style_axes(axes[1, 1], f"5. Ridge Amplitude Threshold  (t={cfg.RIDGE_THRESHOLD})")
+    axes[1, 1].set_xticks([]); axes[1, 1].set_yticks([])
 
-    cb_ori = _cb(axes[0, 5], axes[0, 5].imshow(orient_disp, origin="upper", cmap="hsv",
+    cb_ori = _cb(axes[1, 2], axes[1, 2].imshow(orient_disp, origin="upper", cmap="hsv",
                                                  vmin=0, vmax=180, extent=ext, aspect="auto"))
     cb_ori.ax.axhline(target_angle, color="cyan", linewidth=1.2, linestyle="--")
     cb_ori.ax.annotate(f"{target_angle:.0f}°", xy=(1.05, target_angle),
                        xycoords=("axes fraction", "data"), fontsize=5, color="cyan", va="center")
-    style_axes(axes[0, 5], f"6. Hessian Orientation  (target {target_angle:.0f}°, {mode})")
-    axes[0, 5].set_xticks([]); axes[0, 5].set_yticks([])
+    style_axes(axes[1, 2], f"6. Hessian Orientation  (target {target_angle:.0f}°, {mode})")
+    axes[1, 2].set_xticks([]); axes[1, 2].set_yticks([])
 
-    cb_diff = _cb(axes[0, 6], axes[0, 6].imshow(diff_disp, origin="upper", cmap="RdYlGn_r",
+    cb_diff = _cb(axes[2, 0], axes[2, 0].imshow(diff_disp, origin="upper", cmap="RdYlGn_r",
                                                   vmin=0, vmax=90, extent=ext, aspect="auto"))
     cb_diff.ax.axhline(cfg.ANGLE_TOLERANCE, color="cyan", linewidth=1.2, linestyle="--")
     cb_diff.ax.annotate(f"±{cfg.ANGLE_TOLERANCE:.0f}°", xy=(1.05, cfg.ANGLE_TOLERANCE),
                         xycoords=("axes fraction", "data"), fontsize=5, color="cyan", va="center")
-    style_axes(axes[0, 6], f"7. Angle Deviation  (tol ±{cfg.ANGLE_TOLERANCE:.0f}°)")
-    axes[0, 6].set_xticks([]); axes[0, 6].set_yticks([])
+    style_axes(axes[2, 0], f"7. Angle Deviation  (tol ±{cfg.ANGLE_TOLERANCE:.0f}°)")
+    axes[2, 0].set_xticks([]); axes[2, 0].set_yticks([])
 
-    # ── Row 2: binary mask → gap fill → skeleton → labels → pairs + diag ────────
-    _img(axes[1, 0], binary.astype(np.uint8),   "8. Binary Mask",          cmap="gray", extent=ext)
-    _img(axes[1, 1], closed.astype(np.uint8),   "9. Along-Wall Gap Fill",  cmap="gray", extent=ext)
-    _img(axes[1, 2], skeleton.astype(np.uint8), "10. Skeleton",            cmap="gray", extent=ext)
+    _img(axes[2, 1], binary.astype(np.uint8),   "8. Binary Mask",         cmap="gray", extent=ext)
+    _img(axes[2, 2], closed.astype(np.uint8),   "9. Along-Wall Gap Fill", cmap="gray", extent=ext)
+    _img(axes[3, 0], skeleton.astype(np.uint8), "10. Skeleton",           cmap="gray", extent=ext)
 
     labeled_disp = labeled.astype(float)
     labeled_disp[labeled == 0] = np.nan
-    _cb(axes[1, 3], axes[1, 3].imshow(labeled_disp, origin="upper", cmap="tab20",
+    _cb(axes[3, 1], axes[3, 1].imshow(labeled_disp, origin="upper", cmap="tab20",
                                        extent=ext, aspect="auto", interpolation="nearest"))
-    style_axes(axes[1, 3], f"11. Labeled Components  ({labeled.max()})")
-    axes[1, 3].set_xticks([]); axes[1, 3].set_yticks([])
+    style_axes(axes[3, 1], f"11. Labeled Components  ({labeled.max()})")
+    axes[3, 1].set_xticks([]); axes[3, 1].set_yticks([])
 
     # Panel 12. — pairs on hillshaded DTM
-    axes[1, 4].imshow(hs_raw, origin="upper", extent=ext, aspect="auto")
+    axes[3, 2].imshow(hs_raw, origin="upper", extent=ext, aspect="auto")
     true_idx = coord.get("true_positive_pair_index")
 
     # Pixel → metres conversion at the window centre latitude
@@ -229,7 +218,7 @@ def generate_pipeline_figure(coord: dict, dtm_path: str, output_dir: Path,
         style = pair_style(idx, true_idx)
         geo_segs = pair_to_geo(pair, extent, raw.shape)
         for k, ((gx0, gy0), (gx1, gy1)) in enumerate(geo_segs):
-            axes[1, 4].plot([gx0, gx1], [gy0, gy1],
+            axes[3, 2].plot([gx0, gx1], [gy0, gy1],
                             color=style["colors"][k], linewidth=style["linewidth"],
                             alpha=style["alpha"], zorder=style["zorder"])
 
@@ -246,7 +235,7 @@ def generate_pipeline_figure(coord: dict, dtm_path: str, output_dir: Path,
             (ax1 - ax0) * cos_lat_seg * 111_320.0,
             (ay1 - ay0) * 111_320.0,
         )) % 180
-        axes[1, 4].annotate(
+        axes[3, 2].annotate(
             f"{style['label_text']}  {spacing_m:.0f} m  {pair_azimuth:.0f}°",
             xy=(label_lon, label_lat),
             fontsize=6.5, color=style["label_color"], fontweight="bold",
@@ -258,16 +247,8 @@ def generate_pipeline_figure(coord: dict, dtm_path: str, output_dir: Path,
     pairs_title = f"12. Detected Pairs  ({len(pairs)} pair{'s' if len(pairs) != 1 else ''})"
     if true_idx is not None:
         pairs_title += f"  ·  {confirmed_pairs_label(true_idx)} confirmed"
-    style_axes(axes[1, 4], pairs_title)
-    axes[1, 4].set_xticks([]); axes[1, 4].set_yticks([])
-
-    # Panel 13. — visual diagnostic hillshade next to detected pairs
-    axes[1, 5].imshow(hs_perp32, origin="upper", cmap="gray", extent=ext, aspect="auto",
-                      vmin=0, vmax=1)
-    style_axes(axes[1, 5], f"13. Hillshade ⊥ {target_angle:.0f}°  (az {perp_azimuth:.0f}°, alt 20°)")
-    axes[1, 5].set_xticks([]); axes[1, 5].set_yticks([])
-
-    axes[1, 6].set_visible(False)
+    style_axes(axes[3, 2], pairs_title)
+    axes[3, 2].set_xticks([]); axes[3, 2].set_yticks([])
 
     # Uniform dark frame
     for ax_row in axes:
@@ -301,3 +282,17 @@ def generate_pipeline_figure(coord: dict, dtm_path: str, output_dir: Path,
     print(f"    saved pipeline steps → {step_dir}/")
 
     save_figure(fig, output_dir / name, "pipeline_steps.png", dpi=cfg.DPI)
+
+    # ── Panel 13 — saved standalone (excluded from the main grid) ────────────
+    fig13, ax13 = plt.subplots(1, 1, figsize=(7, 7), facecolor="#1a1a1a")
+    ax13.set_facecolor("#111111")
+    ax13.imshow(hs_perp32, origin="upper", cmap="gray", extent=ext, aspect="auto",
+                vmin=0, vmax=1)
+    style_axes(ax13, f"13. Hillshade ⊥ {target_angle:.0f}°  (az {perp_azimuth:.0f}°, alt 20°)")
+    ax13.set_xticks([]); ax13.set_yticks([])
+    for spine in ax13.spines.values():
+        spine.set_edgecolor("#333333")
+    plt.tight_layout()
+    fig13.savefig(step_dir / "13_hillshade_perp32.png", dpi=cfg.DPI, bbox_inches="tight")
+    plt.close(fig13)
+    print(f"    saved panel 13 → {step_dir}/13_hillshade_perp32.png")
