@@ -31,6 +31,7 @@ env/
 !setup_env.ps1
 !setup_env.sh
 *.ps1
+experiments
 
 # Images (generated outputs)
 *.png
@@ -49,3 +50,13 @@ todo.txt
 
 # experiments/ point-cloud + DTM cache
 experiments/.cache/
+experiments/output/
+
+# Earthwork labels are hand-drawn and irreplaceable: track the site list and
+# each site's labels.geojson (point clouds, grids, chips, models stay ignored)
+!data/earthworks/
+data/earthworks/*
+!data/earthworks/sites.json
+!data/earthworks/sites/
+data/earthworks/sites/*/*
+!data/earthworks/sites/*/labels.geojson
