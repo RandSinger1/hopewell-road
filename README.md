@@ -45,6 +45,11 @@ khthonlidar/
 │
 ├── report/                  Automated report generator
 │
+├── earthwork_builder/       Site list + LiDAR crops + Flask app for outlining known earthworks
+├── earthwork_processor/     PCA surface features (dx, dy, |∇z|, …) + augmented training chips
+├── earthwork_model/         Mask R-CNN (ResNet-50-FPN) training on the chips
+├── earthwork_inference/     Statewide tile index + resumable scan saving candidate outlines/points
+│
 └── data/
     ├── polygons.json         GeoJSON polygon definitions for survey areas
     └── saved_file_lists/     Cached tile URL lists (per area/sub-area)
@@ -236,6 +241,52 @@ after the server starts.
 
 ---
 
+## Earthwork detection (learned)
+
+A second, learned pipeline finds earthworks of any shape statewide.  It works
+on a 1 m ground grid in NAD83(2011) / UTM 17N built either from the vendor
+(OGRIP OSIP III, 2020/2021) ground class of the point clouds — no SMRF — or
+from the USGS 3DEP 1 m DEM (`EW_GROUND_SOURCE`; the DEM makes the statewide
+scan download one raster per 2 km block instead of every LAZ tile).  Inputs
+per pixel: dx, dy, |∇z| from local PCA normals, local relief, PCA curvature.
+Run from the project root:
+
+```bash
+# 1. Sites: edit data/earthworks/sites.json (start from earthwork_builder/sites.example.json),
+#    then download + crop LiDAR for each (or use "Add site" in the app)
+python -m earthwork_builder.prepare
+
+# 2. Outline every earthwork in each site window, tick "Reviewed", Save.
+#    Also outline look-alikes (levees, rail grades, terraces...) with a look-alike
+#    type: they become hard negatives.
+python -m earthwork_builder.server          # http://127.0.0.1:5001
+
+# 3. Features + augmented chips (only reviewed sites; split train/val by site)
+python -m earthwork_processor.build_dataset --name v1
+
+# 4. Train (GPU strongly recommended)
+python -m earthwork_model.train --dataset data/earthworks/dataset/v1
+
+# 5. Index every OH_Statewide tile once, then scan (resumable; Ctrl-C safe)
+python -m earthwork_inference.tile_index
+python -m earthwork_inference.scan --run ohio_v1 --checkpoint data/earthworks/models/v1/best.pt
+python -m earthwork_inference.scan --run ohio_v1 --export
+
+# 6. Review: import candidates as builder sites (prefilled, "unverified"), retype
+#    each as earthwork or look-alike, mark reviewed, rebuild the dataset, retrain
+python -m earthwork_builder.import_candidates --run ohio_v1 --min-score 0.7 --limit 50
+python -m earthwork_builder.prepare
+```
+
+Labels (`sites.json`, `sites/*/labels.geojson`) are tracked by git; everything
+else under `data/earthworks/` is regenerable and ignored.  Training and the
+scan need PyTorch — install it from conda-forge into the same environment
+(see `requirements.txt`); a pip wheel clashes with conda's MKL/OpenMP on Windows.
+The ground source is stored in the dataset and checkpoint; the scan always uses
+the source its model was trained on.
+
+---
+
 ## Configuration
 
 All tunable parameters live in [`parameters.py`](parameters.py).  Edit that file
@@ -253,6 +304,7 @@ Key sections:
 | §7 Area scan | Scan tile size, corridor polygon |
 | §8 Map viewer | Port, hillshade settings, tile renderer |
 | §9 Report | Output coords, DPI, cross-section offsets |
+| §10 Earthworks | Ground classes, pixel size, feature channels, augmentation, training, scan blocks |
 
 ---
 
