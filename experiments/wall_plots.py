@@ -7,9 +7,19 @@ wall_plots.py — Figures for wall_lab Results.
     show_sites_sweep(sites, "param", values)   rows = sites, cols = values
     plot_counts(sites, "param", values)        pair count / top spacing vs value
     show_profile(res, i)                       mean LRM cross-section of pair i
+    show_compare(site, params)                 parameters.py defaults vs `params`, one row each
 
 Panels are drawn in pixel space with metre tick labels centred on the site,
 so the axes read as distance from the coordinate.
+
+Every sweep includes the parameters.py default as a reference: if the swept
+values don't contain it, it is added (in order for ascending numeric values,
+first otherwise), and its panel is framed / its x position marked in
+DEFAULT_COLOR.
+
+The "hillshade" stage is the report's panel 13 view (report/pipeline_steps.py):
+grey hillshade of the smoothed DTM lit perpendicular to the site's target
+bearing at a low sun, so walls running along the corridor shade most strongly.
 """
 
 from __future__ import annotations
@@ -17,17 +27,66 @@ from __future__ import annotations
 import matplotlib.pyplot as plt
 import numpy as np
 
-from report.report_utils import render_hillshaded_dtm, pair_style
+from report.report_utils import render_hillshaded_dtm, hillshade, pair_style
 from experiments.wall_lab import Params, Result, run
 
-STAGES = ("dtm", "lrm", "ridge", "orientation", "binary", "closed", "skeleton")
+STAGES = ("dtm", "lrm", "ridge", "orientation", "binary", "closed", "skeleton", "hillshade")
+DEFAULT_COLOR = "#e69f00"
 
+# azimuth hillshade, as in report/pipeline_steps.py panel 13
+HILLSHADE_ALTITUDE = 20.0
+HILLSHADE_Z_FACTOR = 4.0
+
+
+# ─── parameters.py default as a reference ────────────────────────────────────
+
+def with_default(values, default):
+    """(values with `default` included, index of the default).  An ascending
+    numeric list keeps its order; anything else gets the default prepended."""
+    values = list(values)
+    if default in values:
+        return values, values.index(default)
+    numeric = all(isinstance(v, (int, float)) and not isinstance(v, bool)
+                  for v in values + [default])
+    i = sum(v < default for v in values) if numeric and values == sorted(values) else 0
+    values.insert(i, default)
+    return values, i
+
+
+def fmt(v) -> str:
+    """Short label for a swept value (ft(3) → 9.843, not 9.842500000039369)."""
+    return f"{v:.4g}" if isinstance(v, float) else str(v)
+
+
+def mark_default(ax, label: str = "default"):
+    """Frame a panel in DEFAULT_COLOR and tag its title."""
+    for sp in ax.spines.values():
+        sp.set_edgecolor(DEFAULT_COLOR)
+        sp.set_linewidth(3)
+    if label:
+        ax.set_title(f"{ax.get_title()}  [{label}]", fontsize=9, color=DEFAULT_COLOR)
+
+
+def mark_default_x(ax, i: int, label: str = "parameters.py default"):
+    """Shade category position i on a categorical x-axis."""
+    ax.axvline(i, color=DEFAULT_COLOR, lw=8, alpha=0.3, zorder=0, label=label)
+
+
+def _is_default(res: Result) -> bool:
+    return not res.params.with_(size_m=None).diff()
+
+
+# ─── Panels ───────────────────────────────────────────────────────────────────
 
 def _stage_image(res: Result, stage: str):
     """(array, imshow kwargs) for one stage."""
     nd = res.raw == res.nodata
     if stage == "dtm":
         return render_hillshaded_dtm(res.smoothed, nodata=res.nodata, z_factor=4.0), {}
+    if stage == "hillshade":
+        hs = hillshade(res.smoothed, nodata=res.nodata, azimuth=(res.target_angle + 90.0) % 360.0,
+                       altitude=HILLSHADE_ALTITUDE, z_factor=HILLSHADE_Z_FACTOR)
+        return hs, {"cmap": "gray", "vmin": 0, "vmax": 1}
     if stage == "lrm":
         v = np.where(nd, np.nan, res.lrm)
         lim = np.nanpercentile(np.abs(v), 98) or 1.0
@@ -40,6 +99,13 @@ def _stage_image(res: Result, stage: str):
                "closed": res.closed, "skeleton": res.skeleton}[stage]
         return arr.astype(float), {"cmap": "gray", "vmin": 0, "vmax": 1}
     raise ValueError(f"stage must be one of {STAGES}")
+
+
+def _stage_title(res: Result, stage: str) -> str:
+    if stage == "hillshade":
+        return (f"hillshade ⊥ {res.target_angle:.0f}° "
+                f"(az {(res.target_angle + 90) % 360:.0f}°, alt {HILLSHADE_ALTITUDE:.0f}°)")
+    return stage
 
 
 def _metre_ticks(ax, res: Result, step_m: float = 100):
@@ -94,12 +160,12 @@ def show(res: Result, stage: str = "dtm", ax=None, title: str | None = None,
     return ax
 
 
-def show_stages(res: Result, stages=STAGES, ncols: int = 4):
+def show_stages(res: Result, stages=STAGES, ncols: int = 4, pairs: bool = True):
     nrows = int(np.ceil(len(stages) / ncols))
     fig, axes = plt.subplots(nrows, ncols, figsize=(4 * ncols, 4 * nrows), squeeze=False)
     for ax, stage in zip(axes.flat, stages):
-        show(res, stage, ax=ax, title=stage, pairs=stage in ("dtm", "skeleton"),
-             labels=stage == "dtm")
+        show(res, stage, ax=ax, title=_stage_title(res, stage),
+             pairs=pairs and stage in ("dtm", "skeleton"), labels=stage == "dtm")
     for ax in axes.flat[len(stages):]:
         ax.axis("off")
     changed = res.params.diff()
@@ -109,50 +175,86 @@ def show_stages(res: Result, stages=STAGES, ncols: int = 4):
     return fig
 
 
+def show_compare(site, params: Params, stages=("dtm", "ridge", "closed", "skeleton"),
+                 pairs: bool = True, size: float = 3.6, top: int | None = None):
+    """Row 0 = parameters.py defaults (framed), row 1 = `params`, one column per stage."""
+    rows = [("defaults", Params(size_m=params.size_m)),
+            (", ".join(f"{k}={v}" for k, v in params.diff().items()) or "defaults", params)]
+    fig, axes = plt.subplots(2, len(stages), figsize=(size * len(stages), 2 * size + 0.4),
+                             squeeze=False)
+    for r, (label, p) in enumerate(rows):
+        res = run(site, p)
+        for c, stage in enumerate(stages):
+            show(res, stage, ax=axes[r, c], pairs=pairs and stage in ("dtm", "skeleton"),
+                 labels=stage == "dtm", top=top,
+                 title=(_stage_title(res, stage) + "\n" if r == 0 else "") + f"{len(res.pairs)} pair(s)")
+            if r == 0:
+                mark_default(axes[r, c], label="")
+        axes[r, 0].set_ylabel(label, fontsize=9, color=DEFAULT_COLOR if r == 0 else "black")
+    fig.suptitle(res.coord["name"], fontsize=11)
+    fig.tight_layout()
+    return fig
+
+
+# ─── Sweeps ───────────────────────────────────────────────────────────────────
+
 def _label(res: Result, param: str | None):
     if param is None:
         return ", ".join(f"{k}={v}" for k, v in res.params.diff().items()) or "defaults"
-    return f"{param}={getattr(res.params, param)}"
+    return f"{param}={fmt(getattr(res.params, param))}"
 
 
 def show_sweep(results: list[Result], param: str | None = None, stage: str = "dtm",
-               ncols: int = 4, size: float = 4, top: int | None = None):
-    """One panel per Result. `param` is the swept field (used for titles)."""
+               ncols: int = 4, size: float = 4, top: int | None = None, reference: bool = True):
+    """One panel per Result. `param` is the swept field (used for titles).
+    reference=True prepends a parameters.py-defaults run when the results are
+    all one site and none of them is the default."""
+    results = list(results)
+    one_site = len({r.coord["name"] for r in results}) == 1
+    if reference and one_site and not any(_is_default(r) for r in results):
+        results.insert(0, run(results[0].coord, Params(size_m=results[0].params.size_m)))
     nrows = int(np.ceil(len(results) / ncols))
     fig, axes = plt.subplots(nrows, ncols, figsize=(size * ncols, size * nrows), squeeze=False)
     for ax, res in zip(axes.flat, results):
         show(res, stage, ax=ax, title=f"{_label(res, param)}\n{len(res.pairs)} pair(s)", top=top)
+        if _is_default(res):
+            mark_default(ax)
     for ax in axes.flat[len(results):]:
         ax.axis("off")
-    fig.suptitle(results[0].coord["name"] if len({r.coord["name"] for r in results}) == 1 else "",
-                 fontsize=11)
+    fig.suptitle(results[0].coord["name"] if one_site else "", fontsize=11)
     fig.tight_layout()
     return fig
 
 
 def show_sites_sweep(sites, param: str, values, base: Params | None = None,
                      stage: str = "dtm", size: float = 3.6, top: int | None = None):
-    """Rows = sites, columns = values of one Params field."""
+    """Rows = sites, columns = values of one Params field, plus the
+    parameters.py default (framed) if `values` lacks it."""
     base = base or Params()
+    values, i_def = with_default(values, getattr(Params(), param))
     fig, axes = plt.subplots(len(sites), len(values),
                              figsize=(size * len(values), size * len(sites)), squeeze=False)
     for r, s in enumerate(sites):
         for c, v in enumerate(values):
             res = run(s, base.with_(**{param: v}))
             show(res, stage, ax=axes[r, c],
-                 title=(f"{param}={v}\n" if r == 0 else "") + f"{len(res.pairs)} pair(s)",
+                 title=(f"{param}={fmt(v)}\n" if r == 0 else "") + f"{len(res.pairs)} pair(s)",
                  top=top)
+            if c == i_def:
+                mark_default(axes[r, c], label="default" if r == 0 else "")
         axes[r, 0].set_ylabel(run(s, base).coord["name"], fontsize=10)
     fig.tight_layout()
     return fig
 
 
 def plot_counts(sites, param: str, values, base: Params | None = None, ax=None):
-    """Pair count and top-pair spacing vs one Params field, one line per site."""
+    """Pair count and top-pair spacing vs one Params field, one line per site,
+    with the parameters.py default shaded."""
     base = base or Params()
+    values, i_def = with_default(values, getattr(Params(), param))
     if ax is None:
         _, ax = plt.subplots(1, 2, figsize=(10, 3.2))
-    xs = [str(v) for v in values]
+    xs = [fmt(v) for v in values]
     for s in sites:
         rs = [run(s, base.with_(**{param: v})) for v in values]
         name = rs[0].coord["name"]
@@ -164,6 +266,7 @@ def plot_counts(sites, param: str, values, base: Params | None = None, ax=None):
     ax[1].axhline(base.spacing_meters, color="gray", ls=":", lw=1)
     for a in ax:
         a.set_xlabel(param)
+        mark_default_x(a, i_def)
         a.legend(fontsize=8)
     plt.tight_layout()
     return ax

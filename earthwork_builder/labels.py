@@ -6,7 +6,11 @@ Layout (all under parameters.EW_ROOT, default data/earthworks/):
     sites.json                     [{"name", "lat", "lon", "half_m"?, "notes"?, "split"?}, ...]
                                    ("group": sites whose windows overlap share one, so
                                     they always land in the same train/val split)
-    sites/<slug>/site.json         written by prepare.py: bounds, tiles, CRS, point counts
+                                   ("background": true: no known earthwork, picked for its
+                                    terrain — see add_background.py)
+    sites/<slug>/site.json         written by prepare.py: bounds, tiles, CRS, point counts, and the
+                                   lat/lon/half_m it was built for (if sites.json changes them the
+                                   site is "stale" and no longer counts as prepared)
     sites/<slug>/points.laz        every point in the window, native CRS, all classes
     sites/<slug>/ground.tif        vendor-ground grid, EW_WORK_CRS, EW_PIXEL_M (metres)
     sites/<slug>/labels.geojson    drawn outlines (WGS84) — the source of truth
@@ -22,6 +26,12 @@ look-alike: trained on as a hard negative, never a target) or
 EW_UNVERIFIED_TYPE (an imported scan candidate awaiting a decision — a site
 cannot be marked reviewed while any remain).
 
+A site can instead be marked "rejected" (with a "reject_reason" from
+REJECT_REASONS): the sample is not good enough to learn from — destroyed,
+under trees, mislocated, bad LiDAR — and is left out of the dataset entirely.
+That differs from a reviewed site with no outlines, which is still used as
+empty ground.  A site is never both reviewed and rejected.
+
 ``write_vector`` is also used by earthwork_inference/scan.py, so candidates
 share this schema and can be loaded back into the builder for review.
 """
@@ -35,13 +45,16 @@ from pathlib import Path
 
 from osgeo import ogr, osr
 from shapely import make_valid
-from shapely.geometry import mapping, shape
+from shapely.geometry import Polygon, mapping, shape
 
 import parameters
 
 ogr.UseExceptions()
 
 SITES_DIR = parameters.EW_ROOT / "sites"
+
+REJECT_REASONS = ["not visible / destroyed", "tree cover or noisy ground", "wrong location",
+                  "poor LiDAR coverage", "too ambiguous to outline", "other"]
 
 _DRIVERS = {".shp": "ESRI Shapefile", ".gpkg": "GPKG", ".geojson": "GeoJSON"}
 
@@ -69,6 +82,12 @@ class Site:
     extra: dict = field(default_factory=dict)
 
     @property
+    def background(self) -> bool:
+        """"background": true in sites.json — a window chosen for its terrain, with
+        no known earthwork; trains as EW_BACKGROUND_SITE_CHIPS random chips."""
+        return bool(self.extra.get("background"))
+
+    @property
     def slug(self) -> str:
         return slugify(self.name)
 
@@ -90,7 +109,21 @@ class Site:
 
     @property
     def prepared(self) -> bool:
-        return self.ground_path.exists() and (self.dir / "site.json").exists()
+        """Built, and built for the current window (a moved/resized site is not prepared)."""
+        return (self.ground_path.exists() and (self.dir / "site.json").exists()
+                and not self.stale)
+
+    @property
+    def stale(self) -> bool:
+        """site.json was built for other coords / half_m than sites.json now has."""
+        meta_path = self.dir / "site.json"
+        if not meta_path.exists():
+            return False
+        meta = json.loads(meta_path.read_text())
+        built = (meta.get("lat"), meta.get("lon"), meta.get("half_m"))
+        if None in built:
+            return False
+        return any(abs(float(b) - c) > 1e-9 for b, c in zip(built, (self.lat, self.lon, self.half_m)))
 
     def to_json(self) -> dict:
         d = {"name": self.name, "lat": self.lat, "lon": self.lon, "half_m": self.half_m}
@@ -115,12 +148,17 @@ def load_sites(path: Path = parameters.EW_SITES_FILE) -> list[Site]:
     dupes = {s for s in slugs if slugs.count(s) > 1}
     if dupes:
         raise ValueError(f"{path}: site names collide after slugifying: {sorted(dupes)}")
-    return sites
+    return sorted(sites, key=_site_order)
+
+
+def _site_order(site: Site) -> str:
+    return site.name.casefold()                    # alphabetical, ignoring case
 
 
 def save_sites(sites: list[Site], path: Path = parameters.EW_SITES_FILE) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps([s.to_json() for s in sites], indent=2), encoding="utf-8")
+    path.write_text(json.dumps([s.to_json() for s in sorted(sites, key=_site_order)], indent=2),
+                    encoding="utf-8")
 
 
 def get_site(slug: str, sites: list[Site] | None = None) -> Site:
@@ -136,7 +174,7 @@ def read_labels(site: Site) -> dict:
     """The site's FeatureCollection (empty, unreviewed if none saved yet)."""
     if site.labels_path.exists():
         return json.loads(site.labels_path.read_text(encoding="utf-8"))
-    return {"type": "FeatureCollection", "features": [], "reviewed": False}
+    return {"type": "FeatureCollection", "features": [], "reviewed": False, "rejected": False}
 
 
 def label_polygons(site: Site) -> list[tuple[object, dict]]:
@@ -153,6 +191,12 @@ def save_labels(site: Site, fc: dict) -> dict:
         geom = shape(f["geometry"])
         if geom.geom_type != "Polygon":
             raise ValueError(f"feature {i}: expected Polygon, got {geom.geom_type}")
+        holes = [Polygon(h) for h in geom.interiors]
+        shell = Polygon(geom.exterior)
+        if any(not shell.contains(h) for h in holes) or any(
+                a.intersects(b) for k, a in enumerate(holes) for b in holes[k + 1:]):
+            raise ValueError(f"feature {i}: an interior must lie inside its outline "
+                             f"and not touch another interior - redraw it")
         if not geom.is_valid:
             # make_valid (not buffer(0), which silently drops a bowtie's second lobe)
             geom = make_valid(geom)
@@ -165,17 +209,39 @@ def save_labels(site: Site, fc: dict) -> dict:
         features.append({"type": "Feature", "geometry": mapping(geom),
                          "properties": {"id": i, "type": kind, "notes": props.get("notes", "")}})
     reviewed = bool(fc.get("reviewed", False))
+    rejected = bool(fc.get("rejected", False))
+    reason = str(fc.get("reject_reason") or "") if rejected else ""
+    if reviewed and rejected:
+        raise ValueError("a site cannot be both reviewed and rejected")
     pending = [f["properties"]["id"] for f in features
                if f["properties"]["type"] == parameters.EW_UNVERIFIED_TYPE]
     if reviewed and pending:
         raise ValueError(f"outline(s) {pending} are still '{parameters.EW_UNVERIFIED_TYPE}' - "
                          f"give each a real or look-alike type (or delete it) before marking reviewed")
-    out = {"type": "FeatureCollection", "features": features, "reviewed": reviewed}
+    out = {"type": "FeatureCollection", "features": features, "reviewed": reviewed,
+           "rejected": rejected, "reject_reason": reason}
     site.dir.mkdir(parents=True, exist_ok=True)
     site.labels_path.write_text(json.dumps(out, indent=2), encoding="utf-8")
     write_vector(site.dir / "labels.shp",
                  [(shape(f["geometry"]), dict(f["properties"], site=site.slug)) for f in features])
     return out
+
+
+def inset_ring(ring: list[list[float]], inset_m: float) -> list[list[float]] | None:
+    """Shrink an outline ([[lon, lat], …]) inward by inset_m metres — the builder's
+    default enclosure interior (inset = wall width).  Buffered in EW_WORK_CRS with
+    mitred corners; the largest piece is kept if the inset splits it.  None if
+    nothing is left."""
+    from pyproj import Transformer
+    fwd = Transformer.from_crs("EPSG:4326", parameters.EW_WORK_CRS, always_xy=True)
+    inv = Transformer.from_crs(parameters.EW_WORK_CRS, "EPSG:4326", always_xy=True)
+    poly = make_valid(Polygon([fwd.transform(lon, lat) for lon, lat in ring]))
+    inner = poly.buffer(-float(inset_m), join_style="mitre", mitre_limit=3.0)
+    parts = [g for g in getattr(inner, "geoms", [inner]) if g.geom_type == "Polygon" and not g.is_empty]
+    if not parts:
+        return None
+    best = max(parts, key=lambda g: g.area).simplify(0.05)
+    return [list(inv.transform(x, y)) for x, y in best.exterior.coords]
 
 
 # ─── Vector export ────────────────────────────────────────────────────────────

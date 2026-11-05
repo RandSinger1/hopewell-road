@@ -47,6 +47,10 @@ class ChipDataset(Dataset):
         size = feats.shape[-1]
         polys = np.split(d["poly_xy"], np.cumsum(d["poly_len"])[:-1]) if len(d["poly_len"]) else []
         masks = np.stack([rasterize(p, size) for p in polys]) if polys else np.zeros((0, size, size), bool)
+        if "hole_len" in d and len(d["hole_len"]):          # interiors cut out of their outline
+            holes = np.split(d["hole_xy"], np.cumsum(d["hole_len"])[:-1])
+            for h, j in zip(holes, d["hole_of"]):
+                masks[j] &= ~rasterize(h, size)
 
         if self.augment:
             # torch's RNG, not numpy's: DataLoader reseeds it per worker

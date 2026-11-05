@@ -77,7 +77,8 @@ def fetch_dem_grid(bounds: tuple[float, float, float, float],
 def ground_grid(bounds: tuple[float, float, float, float], source: str, paths=None,
                 pixel_m: float = parameters.EW_PIXEL_M) -> GroundGrid:
     """Ground grid over work-CRS ``bounds`` from ``source``: "dem", or "points"
-    (vendor ground class of the LAZ files in ``paths``, read one at a time)."""
+    (vendor ground class of the LAZ files in ``paths``, streamed in chunks, so a
+    big site's points.laz never has to fit in memory)."""
     if source == "dem":
         return fetch_dem_grid(bounds, pixel_m)
     if source != "points":
@@ -86,5 +87,6 @@ def ground_grid(bounds: tuple[float, float, float, float], source: str, paths=No
 
     acc = GridAccumulator(bounds, pixel_m)
     for p in paths or []:
-        acc.add(point_io.read_tile(p, classes=parameters.EW_GROUND_CLASSES, work_bounds=bounds).xyz)
+        for xyz in point_io.iter_xyz(p, classes=parameters.EW_GROUND_CLASSES):
+            acc.add(xyz)                  # drops points outside bounds itself
     return acc.finish()

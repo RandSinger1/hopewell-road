@@ -619,6 +619,12 @@ EW_COLLECTION_PREFIX: str = "OH_Statewide"
 """Only tiles from collections whose name starts with this are used (the
 OSIP III 2020/2021 QL2 flights, whose vendor ground class we rely on)."""
 
+EW_FALLBACK_COLLECTIONS: bool = True
+"""Site windows that no EW_COLLECTION_PREFIX tile touches (a few spots OSIP III
+skipped, e.g. Johnson's Island) use the newest non-legacy collection there
+instead (point_io.fallback_collection; recorded as 'collections' in site.json).
+The statewide scan's tile index is OH_Statewide only, so it never scans them."""
+
 EW_GROUND_CLASSES: tuple = (2,)
 """LAS classes treated as bare earth.  The vendor (OGRIP) class 2 is used
 as-is — no SMRF re-classification."""
@@ -675,6 +681,19 @@ EW_CANDIDATE_HALF_M: float = 300.0
 EW_BUILDER_PORT: int = 5001
 """Port for the earthwork_builder Flask app (the map viewer uses SERVER_PORT)."""
 
+EW_VIZ_Z_FACTOR: float = 3.0
+"""Vertical exaggeration for the builder's hillshade / slope views (earthworks
+are often < 1 m high on near-flat ground)."""
+
+EW_VIZ_ALTITUDE: float = 35.0
+"""Sun altitude (degrees) for the builder's multi-directional hillshade."""
+
+EW_VIZ_LRM_RADIUS_M: float = 10.0
+"""Half-size (m) of the mean surface subtracted for the builder's local-relief view."""
+
+EW_VIZ_CLIP_PCT: float = 98.0
+"""Percentile used to stretch slope and local relief to full contrast per site."""
+
 # ── Ground grid + features (earthwork_processor) ─────────────────────────────
 
 EW_PIXEL_M: float = 1.0
@@ -720,6 +739,31 @@ EW_CHIPS_PER_NEGATIVE: int = 6
 EW_BACKGROUND_CHIPS_PER_SITE: int = 8
 """Extra chips per site centred at random (most contain no earthwork) — the
 empty-ground examples a detector needs to learn what is *not* an earthwork."""
+
+EW_LOOKALIKE_TRAINING: str = "ignore"
+"""How look-alike outlines (EW_NEGATIVE_TYPES) are used in training:
+  "hard_negative" — EW_CHIPS_PER_NEGATIVE extra chips centred on each, so the
+                    model is actively taught to ignore them (fewer false positives);
+  "background"    — no extra chips; a look-alike that happens to fall inside
+                    another chip is ordinary unlabelled ground;
+  "ignore"        — no extra chips, and every chip blanks the look-alike's
+                    pixels (valid = False → channel mean) so the model gets no
+                    signal about it either way.  Most permissive: look-alikes
+                    near known works stay possible detections.
+Changing this needs a dataset rebuild + retraining."""
+
+EW_BACKGROUND_SITE_CHIPS: int = 16
+"""Random chips per *background* site ("background": true in sites.json: a
+window with no known earthwork, picked to show terrain the earthwork windows
+lack).  Used instead of EW_BACKGROUND_CHIPS_PER_SITE for those sites."""
+
+EW_BACKGROUND_MIN_SEP_M: float = 3000.0
+"""add_background --random: minimum distance (m) from a random background
+site to any existing site, so it never overlaps a known earthwork window."""
+
+EW_BACKGROUND_MIN_COVER: float = 0.95
+"""add_background --random: fraction of the window that OH_Statewide tiles must
+cover (rejects points outside Ohio, in Lake Erie, or in coverage gaps)."""
 
 EW_AUG_ROTATION: bool = True
 """Rotate chips by a uniform random angle (the DTM is rotated, then features
@@ -787,10 +831,10 @@ EW_SCORE_THRESHOLD: float = 0.5
 EW_NMS_IOU: float = 0.3
 """Box IoU above which overlapping detections from adjacent chips are merged."""
 
-EW_MIN_CANDIDATE_M2: float = 50.0
+EW_MIN_CANDIDATE_M2: float = 5.0
 """Candidates smaller than this (m²) are discarded."""
 
-EW_CANDIDATE_MARGIN_M: float = 30.0
+EW_CANDIDATE_MARGIN_M: float = 3.0
 """Margin (m) around a candidate's outline for the saved point-cloud crop."""
 
 EW_TILE_CACHE_GB: float = 40.0

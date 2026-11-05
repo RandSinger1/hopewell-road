@@ -22,10 +22,13 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import shutil
 import time
 from dataclasses import dataclass
 from functools import lru_cache
-from pathlib import Path
+from pathlib import Path, PurePosixPath
+from urllib.parse import urlparse
 
 import numpy as np
 import pdal
@@ -94,20 +97,100 @@ def statewide_only(tiles: list[dict], prefix: str = parameters.EW_COLLECTION_PRE
     return [t for t in tiles if collection_of(t).startswith(prefix)]
 
 
-def find_tiles(bbox: tuple[float, float, float, float]) -> list[dict]:
+def _collection_year(name: str) -> int:
+    years = [int(y) for y in re.findall(r"(?<!\d)(?:19|20)\d\d(?!\d)", name)]
+    return max(years, default=0)
+
+
+def work_box(t: dict):
+    """A listing's footprint (its lon/lat bbox) as a shapely box in EW_WORK_CRS."""
+    import shapely
+    xs, ys = lonlat_to_work(np.array([t["min_lon"], t["max_lon"], t["max_lon"], t["min_lon"]]),
+                            np.array([t["min_lat"], t["min_lat"], t["max_lat"], t["max_lat"]]))
+    return shapely.box(min(xs), min(ys), max(xs), max(ys))
+
+
+def _block(t: dict) -> str:
+    """Delivery folder of a listing, e.g. 'OH_StatewideP3_6_B21' (…/<block>/LAZ/<file>)."""
+    return PurePosixPath(urlparse(t["url"]).path).parts[-3]
+
+
+def unique_tiles(tiles: list[dict], tol_m: float = 15.0) -> list[dict]:
+    """Drop listings that add no points.  ScienceBase lists some OSIP III tile ids
+    twice, under neighbouring delivery blocks (e.g. OH_StatewideP3_6_B21 / _7_B21):
+    one is the full tile, the other a ~95 m sliver along the block edge that lies
+    inside it.  These are different files with the same name.  A listing whose
+    footprint lies inside another listing of the same id is dropped (exact
+    duplicates included); listings that remain sharing an id get ``variant`` so
+    they are cached under different names (``cache_path``)."""
+    by_url = {t["url"]: t for t in tiles}
+    groups: dict[str, list[dict]] = {}
+    for t in by_url.values():
+        groups.setdefault(t["tile_id"], []).append(t)
+    out = []
+    for ts in groups.values():
+        boxes = [work_box(t) for t in ts]
+        # biggest first, so of two equal footprints the first is kept
+        order = sorted(range(len(ts)), key=lambda i: -boxes[i].area)
+        kept: list[int] = []
+        for i in order:
+            if not any(boxes[k].buffer(tol_m).contains(boxes[i]) for k in kept):
+                kept.append(i)
+        for i in kept:
+            out.append(dict(ts[i], variant=len(kept) > 1))
+    return out
+
+
+def fill_tiles(window, covered, candidates: list[dict], min_frac: float = 0.002) -> list[dict]:
+    """Tiles that fill the part of ``window`` (shapely, work CRS) outside ``covered``,
+    from non-legacy ``candidates``: newest collection first, each tile tagged with
+    ``clip`` = the still-uncovered area it alone supplies, so points never overlap.
+    For spots OSIP III skipped (Johnson's Island, much of Delaware County, ...)."""
+    gap = window.difference(covered)
+    out = []
+    modern = [t for t in candidates if "/legacy/" not in t["url"]
+              and not collection_of(t).startswith(parameters.EW_COLLECTION_PREFIX)]
+    for coll in sorted({collection_of(t) for t in modern}, key=lambda c: (-_collection_year(c), c)):
+        if gap.area < min_frac * window.area:
+            break
+        ts = [t for t in unique_tiles([t for t in modern if collection_of(t) == coll])
+              if work_box(t).intersects(gap)]
+        if not ts:
+            continue
+        clip = gap
+        out += [dict(t, clip=clip) for t in ts]
+        gap = gap.difference(shapely_union([work_box(t) for t in ts]))
+    return out
+
+
+def shapely_union(geoms):
+    import shapely
+    return shapely.union_all(geoms) if geoms else shapely.Polygon()
+
+
+def find_tiles(bbox: tuple[float, float, float, float],
+               fallback: bool = parameters.EW_FALLBACK_COLLECTIONS,
+               window=None) -> list[dict]:
     """Statewide tiles covering ``bbox``.  ScienceBase is authoritative (the saved
     lists only cover the corridor AOIs, so they can cover a site partially);
     tiles already downloaded for those lists are reused via 'local'.  Falls back
-    to the saved lists alone when ScienceBase is unreachable."""
+    to the saved lists alone when ScienceBase is unreachable.  With ``fallback``,
+    the part of ``window`` (shapely, work CRS; default: ``bbox``) no statewide tile
+    covers is filled by ``fill_tiles`` (those tiles carry a ``clip`` geometry)."""
     saved = {t["tile_id"]: t for t in statewide_only(saved_list_tiles(bbox))}
     try:
-        tiles = statewide_only(query_tiles(bbox))
+        everything = query_tiles(bbox)
     except Exception as e:
         print(f"  ScienceBase unavailable ({e}); using saved tile lists only")
         return list(saved.values())
+    tiles = unique_tiles(statewide_only(everything))
     for t in tiles:
-        if t["tile_id"] in saved:
+        if t["tile_id"] in saved and not t["variant"]:
             t["local"] = saved[t["tile_id"]]["local"]
+    if fallback:
+        if window is None:
+            window = work_box({"min_lon": bbox[0], "min_lat": bbox[1], "max_lon": bbox[2], "max_lat": bbox[3]})
+        tiles += fill_tiles(window, shapely_union([work_box(t) for t in tiles]), everything)
     return tiles
 
 
@@ -127,11 +210,16 @@ def fetch_tile(tile: dict, cache_dir: Path = parameters.EW_TILE_CACHE, attempts:
     mistaken for a complete tile on the next run.  On top of the session's
     short retries, waits 30 s → 4 min between attempts: rockyweb answers
     bursts with HTTP 429, which a multi-day scan has to ride out."""
-    if tile.get("local"):
+    if tile.get("local") and extent_matches(tile["local"], tile):
         return Path(tile["local"])
-    dest = Path(cache_dir) / f"{tile_file_stem(tile['url'])}.laz"
+    dest = cache_path(tile, cache_dir)
     if dest.exists():
-        return dest
+        if extent_matches(dest, tile):
+            return dest
+        # The other file of a duplicated tile id (cached before variants got their
+        # own names), or a corrupt download: replace it
+        print(f"  {dest.name}: cached file does not match its listing; downloading it again")
+        dest.unlink()
     import requests
     from lidar.generate_tiles import _make_session
 
@@ -144,13 +232,61 @@ def fetch_tile(tile: dict, cache_dir: Path = parameters.EW_TILE_CACHE, attempts:
                 with open(part, "wb") as f:
                     for chunk in r.iter_content(chunk_size=1 << 20):
                         f.write(chunk)
+                # A connection dropped mid-body raises nothing: check the length
+                expected = r.headers.get("Content-Length")
+                if expected and not r.headers.get("Content-Encoding") and part.stat().st_size != int(expected):
+                    raise requests.RequestException(
+                        f"incomplete download of {dest.name}: {part.stat().st_size} of {expected} bytes")
             break
         except requests.RequestException:
             if attempt == attempts - 1:
                 raise
             time.sleep(30 * 2 ** attempt)
     os.replace(part, dest)
+    if not extent_matches(dest, tile):
+        raise RuntimeError(f"{dest.name}: downloaded file's extent does not match its listing")
     return dest
+
+
+def cache_path(tile: dict, cache_dir: Path = parameters.EW_TILE_CACHE) -> Path:
+    """Cache file of a listing: the USGS file stem, plus the delivery block for
+    ``variant`` listings (two different files sharing one tile id)."""
+    stem = tile_file_stem(tile["url"])
+    return Path(cache_dir) / (f"{stem}__{_block(tile)}.laz" if tile.get("variant") else f"{stem}.laz")
+
+
+def file_work_bounds(path: Path | str) -> tuple[float, float, float, float]:
+    """(xmin, ymin, xmax, ymax) of a LAZ file's header, in EW_WORK_CRS (header-only read)."""
+    p = pdal.Pipeline(json.dumps([{"type": "readers.las", "filename": str(path), "count": 0,
+                                   "default_srs": parameters.EW_FALLBACK_SRS}]))
+    p.execute()
+    md = p.metadata["metadata"]["readers.las"]
+    crs = parse_crs(_srs_wkt(p.metadata))
+    xs, ys = to_work(np.array([md["minx"], md["maxx"], md["maxx"], md["minx"]]),
+                     np.array([md["miny"], md["miny"], md["maxy"], md["maxy"]]), crs)
+    return min(xs), min(ys), max(xs), max(ys)
+
+
+_extent_ok: dict[tuple, bool] = {}
+
+
+def extent_matches(path: Path | str, tile: dict, tol_m: float = 15.0) -> bool:
+    """Does the file's header extent match the listing's footprint?  Catches the
+    wrong file of a duplicated tile id (a 95 m sliver vs the full tile) and
+    unreadable files.  Memoised per (path, mtime, size)."""
+    try:
+        st = os.stat(path)
+    except OSError:
+        return False
+    key = (str(path), st.st_mtime_ns, st.st_size, tile["url"])
+    if key not in _extent_ok:
+        try:
+            got = file_work_bounds(path)
+            want = work_box(tile).bounds
+            _extent_ok[key] = all(abs(a - b) <= tol_m for a, b in zip(got, want))
+        except RuntimeError:
+            _extent_ok[key] = False
+    return _extent_ok[key]
 
 
 # ─── CRS handling ─────────────────────────────────────────────────────────────
@@ -236,11 +372,23 @@ def read_tile(path: Path | str, classes: tuple | None = None,
     return pc
 
 
+def _native_to(points: np.ndarray, crs: TileCRS, ref: TileCRS) -> np.ndarray:
+    """``points`` (native X/Y/Z in ``crs``) converted to ``ref``'s native CRS / units."""
+    if crs.wkt == ref.wkt:
+        return points
+    pts = points.copy()
+    nx, ny = _transformer(crs.horizontal.to_wkt(), ref.horizontal.to_wkt()).transform(pts["X"], pts["Y"])
+    pts["X"], pts["Y"] = nx, ny
+    pts["Z"] = pts["Z"] * (crs.z_to_m / ref.z_to_m)
+    return pts
+
+
 def read_tiles(paths: list, classes: tuple | None = None,
                work_bounds: tuple[float, float, float, float] | None = None) -> PointCloud:
     """Read several tiles into one cloud.  Tiles in a different native CRS than
     the first (Ohio North vs South) have their native X/Y/Z converted to it, and
-    only the dimensions every tile shares are kept, so ``points`` stays writable."""
+    only the dimensions every tile shares are kept, so ``points`` stays writable.
+    Holds everything in memory (~75 B/point) — for big windows use crop_tiles_to_laz."""
     clouds = [read_tile(p, classes, work_bounds) for p in paths]
     clouds = [c for c in clouds if len(c)] or clouds[:1]
     if not clouds:
@@ -248,18 +396,86 @@ def read_tiles(paths: list, classes: tuple | None = None,
     ref = clouds[0].crs
     common = [n for n in clouds[0].points.dtype.names
               if all(n in c.points.dtype.names for c in clouds)]
-    parts = []
-    for c in clouds:
-        pts = c.points[common].copy()
-        if c.crs.wkt != ref.wkt:
-            nx, ny = _transformer(c.crs.horizontal.to_wkt(), ref.horizontal.to_wkt()).transform(
-                pts["X"], pts["Y"])
-            pts["X"], pts["Y"] = nx, ny
-            pts["Z"] = pts["Z"] * (c.crs.z_to_m / ref.z_to_m)
-        parts.append(pts)
+    parts = [_native_to(c.points[common].copy(), c.crs, ref) for c in clouds]
     # Repack so the result is a plain (non-view) structured array
     points = np.concatenate([np.asarray(p, dtype=parts[0].dtype) for p in parts])
     return PointCloud(points, ref, np.concatenate([c.xyz for c in clouds]))
+
+
+def crop_tiles_to_laz(paths: list, work_bounds: tuple[float, float, float, float], out: Path | str,
+                      on_cloud=None, refetch=None, clips=None) -> tuple[int, TileCRS | None]:
+    """Crop tiles to ``work_bounds`` into one LAZ without holding the window in memory.
+
+    Each tile is read, cropped and written as a chunk file (in the first non-empty
+    tile's native CRS, as read_tiles does), then PDAL stream-merges the chunks.
+    ``on_cloud(cloud)`` sees every cropped tile (e.g. to bin ground points).
+    ``refetch(path) -> path`` replaces a tile PDAL cannot read (a corrupt or
+    truncated download); it is tried once per tile.  ``clips[i]`` (shapely, work
+    CRS, or None) keeps only tile i's points inside it (fill tiles: see fill_tiles).
+    Returns (point count, native CRS of ``out``); writes nothing if no point falls inside."""
+    out = Path(out)
+    chunk_dir = out.with_name(out.stem + ".chunks")
+    shutil.rmtree(chunk_dir, ignore_errors=True)
+    chunk_dir.mkdir(parents=True)
+    ref, chunks, n = None, [], 0
+    try:
+        for i, p in enumerate(paths):
+            try:
+                cloud = read_tile(p, work_bounds=work_bounds)
+            except RuntimeError as e:                 # PDAL: unreadable LAZ
+                if refetch is None:
+                    raise RuntimeError(f"{Path(p).name}: {e}") from e
+                print(f"  {Path(p).name} is unreadable ({e}); downloading it again")
+                cloud = read_tile(refetch(p), work_bounds=work_bounds)
+            clip = clips[i] if clips else None
+            if clip is not None and len(cloud):
+                import shapely
+                shapely.prepare(clip)
+                cloud = cloud.subset(shapely.contains_xy(clip, cloud.xyz[:, 0], cloud.xyz[:, 1]))
+            if not len(cloud):
+                continue
+            if on_cloud is not None:
+                on_cloud(cloud)
+            ref = ref or cloud.crs
+            pts = _native_to(cloud.points, cloud.crs, ref)
+            chunks.append(write_laz(PointCloud(pts, ref, cloud.xyz), chunk_dir / f"{len(chunks)}.laz"))
+            n += len(cloud)
+            del cloud, pts
+        if chunks:
+            tmp = out.with_suffix(".tmp.laz")
+            stages = [{"type": "readers.las", "filename": str(c)} for c in chunks]
+            stages.append({"type": "writers.las", "filename": str(tmp), "compression": "laszip",
+                           "a_srs": ref.wkt, "minor_version": 4, "extra_dims": "all", "forward": "all"})
+            merge = pdal.Pipeline(json.dumps(stages))
+            merge.execute_streaming(chunk_size=1_000_000)
+            del merge                                 # its readers hold the chunk files open
+            os.replace(tmp, out)
+    finally:
+        import gc
+        gc.collect()
+        for _ in range(5):                            # OneDrive briefly holds the emptied folder
+            shutil.rmtree(chunk_dir, ignore_errors=True)
+            if not chunk_dir.exists():
+                break
+            time.sleep(1)
+    return n, ref
+
+
+def iter_xyz(path: Path | str, classes: tuple | None = None, chunk_size: int = 2_000_000):
+    """Work-CRS (N, 3) xyz of a LAZ file, chunk by chunk (constant memory)."""
+    head = pdal.Pipeline(json.dumps([{"type": "readers.las", "filename": str(path), "count": 0,
+                                      "default_srs": parameters.EW_FALLBACK_SRS}]))
+    head.execute()
+    crs = parse_crs(_srs_wkt(head.metadata))
+    stages: list[dict] = [{"type": "readers.las", "filename": str(path),
+                           "default_srs": parameters.EW_FALLBACK_SRS}]
+    if classes:
+        stages.append({"type": "filters.range",
+                       "limits": ",".join(f"Classification[{c}:{c}]" for c in classes)})
+    for pts in pdal.Pipeline(json.dumps(stages)).iterator(chunk_size=chunk_size):
+        if len(pts):
+            wx, wy = to_work(pts["X"], pts["Y"], crs)
+            yield np.column_stack([wx, wy, pts["Z"] * crs.z_to_m])
 
 
 def write_laz(cloud: PointCloud, path: Path | str) -> Path:

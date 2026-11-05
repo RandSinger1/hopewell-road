@@ -51,7 +51,6 @@ from earthwork_inference.tile_index import INDEX_PATH, open_index, tiles_in_bbox
 from lidar import point_io
 from lidar.dem_source import ground_grid
 from lidar.ground_grid import GroundGrid
-from lidar.tile_filter import tile_file_stem
 
 SCAN_ROOT = parameters.EW_ROOT / "scan"
 
@@ -114,7 +113,7 @@ class TileCache:
         self.pool = ThreadPoolExecutor(workers)
 
     def path_for(self, tile: dict) -> Path:
-        return Path(tile["local"]) if tile.get("local") else self.root / f"{tile_file_stem(tile['url'])}.laz"
+        return Path(tile["local"]) if tile.get("local") else point_io.cache_path(tile, self.root)
 
     def ensure(self, tiles: list[dict]) -> list[Path]:
         paths = list(self.pool.map(lambda t: point_io.fetch_tile(t, self.root), tiles))

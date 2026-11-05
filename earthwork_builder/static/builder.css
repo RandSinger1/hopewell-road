@@ -26,7 +26,8 @@ body {
   border-right: 1px solid var(--border);
 }
 
-#map { flex: 1; }
+#map-wrap { flex: 1; position: relative; }
+#map { position: absolute; inset: 0; }
 
 h1 { font-size: 16px; margin: 0 0 12px; }
 h2 { font-size: 14px; margin: 14px 0 6px; }
@@ -79,3 +80,68 @@ input[type="range"] { width: 100%; }
 .swatch.earthwork { background: #ffb000; }
 .swatch.negative { background: #4cc9f0; }
 .swatch.unverified { background: #f72585; }
+
+/* Drawing workflow */
+button.primary { background: var(--accent); color: #111; font-weight: 600; border-color: var(--accent); }
+button.wide { width: 100%; padding: 8px; margin: 8px 0 2px; font-size: 14px; }
+button.active { outline: 2px solid #fff; }
+button:disabled { opacity: 0.45; cursor: not-allowed; }
+kbd {
+  font: 11px ui-monospace, monospace;
+  padding: 0 4px;
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  opacity: 0.7;
+}
+
+#draw-hint, #inset-panel {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1000;
+  max-width: min(560px, calc(100% - 120px));
+  padding: 10px 14px;
+  background: rgba(31, 34, 41, 0.95);
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+}
+#draw-hint .row, #inset-panel .row { margin-bottom: 0; flex-wrap: wrap; }
+#inset-panel { width: 340px; }
+#inset-panel label { display: block; margin: 6px 0; }
+#inset-panel input[type="range"] { width: 100%; }
+
+#toast {
+  position: absolute;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1000;
+  padding: 8px 14px;
+  background: rgba(31, 34, 41, 0.95);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+#label-list li { padding: 3px 4px; border-radius: 4px; }
+#label-list li.selected { background: #33384a; }
+
+/* Terrain view picker */
+.view-picker { display: flex; flex-wrap: wrap; gap: 2px 10px; align-items: center; margin: 8px 0; }
+.view-picker label { display: inline-flex; gap: 4px; margin: 0; cursor: pointer; }
+
+/* Rejecting a site */
+button.danger { background: #c0392b; border-color: #c0392b; color: #fff; }
+#reject-box { margin: 10px 0; }
+#reject-box summary { cursor: pointer; color: var(--muted); }
+#reject-box select { flex: 1; min-width: 0; }
+#rejected-banner {
+  display: flex; gap: 8px; align-items: center;
+  margin: 8px 0; padding: 6px 8px;
+  background: rgba(192, 57, 43, 0.2); border: 1px solid #c0392b; border-radius: 4px;
+}
+#rejected-banner[hidden] { display: none; }
+#site-list li.rejected span:first-child { text-decoration: line-through; opacity: 0.6; }
+#site-list .bg-tag { margin-left: 6px; padding: 0 4px; border-radius: 3px; font-size: 0.75em;
+                     background: #555; color: #ddd; }

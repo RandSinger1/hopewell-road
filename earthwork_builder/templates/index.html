@@ -25,6 +25,7 @@
           </div>
           <input name="half_m" placeholder="Half-size m (default {{ default_half | int }})" type="number" step="any" />
           <input name="notes" placeholder="Notes" />
+          <label class="check" title="No known earthwork here: a window picked for its terrain (towns, quarries, hills...)"><input name="background" type="checkbox" /> Background site</label>
           <button type="submit">Add + download LiDAR</button>
         </form>
       </details>
@@ -34,18 +35,44 @@
       <h2 id="site-title"></h2>
       <p id="site-notes" class="muted"></p>
       <div id="job" class="muted"></div>
+      <div id="rejected-banner" hidden>
+        <b>Rejected:</b> <span id="rejected-reason"></span>
+        <button id="unreject">Undo</button>
+      </div>
+      <button id="draw" class="primary wide">✏ Draw outline <kbd>D</kbd></button>
+      <div class="muted">Enclosure? Select it and press <kbd>O</kbd> (or ⊚ in its row) for a shrunk
+        copy of the outline as its interior, or <kbd>I</kbd> (◎) to draw one — either is cut out of
+        the outline, so it trains as plain ground. Both are optional.</div>
       <label class="check">
         <input type="checkbox" id="reviewed" />
         Reviewed — every earthwork in this window is outlined
       </label>
       <div class="row">
-        <button id="save">Save</button>
+        <button id="save">Save <kbd>Ctrl+S</kbd></button>
+        <button id="next">Next site <kbd>N</kbd></button>
         <span id="dirty" class="muted"></span>
       </div>
-      <label>Hillshade opacity
+      <div class="view-picker">
+        <span class="muted">View <kbd>V</kbd></span>
+        {% for key, label in views.items() %}
+        <label><input type="radio" name="view" value="{{ key }}" {% if loop.first %}checked{% endif %} /> {{ label }}</label>
+        {% endfor %}
+      </div>
+      <label>Terrain opacity
         <input type="range" id="opacity" min="0" max="1" step="0.05" value="1" />
       </label>
-      <h3>Outlines <span class="muted">(draw with the polygon tool, top-left)</span></h3>
+      <details id="reject-box">
+        <summary>Not good enough? Reject this site <kbd>R</kbd></summary>
+        <p class="muted">Rejected sites are left out of training entirely. (A reviewed site with
+          no outlines is different: it is still used as empty ground.)</p>
+        <div class="row">
+          <select id="reject-reason">
+            {% for r in reject_reasons %}<option>{{ r }}</option>{% endfor %}
+          </select>
+          <button id="reject" class="danger">Reject</button>
+        </div>
+      </details>
+      <h3>Outlines <span class="muted">(click one on the map to select it)</span></h3>
       <p class="muted legend">
         <span class="swatch earthwork"></span>earthwork
         <span class="swatch negative"></span>look-alike (trained as "not an earthwork")
@@ -54,12 +81,39 @@
       <ul id="label-list"></ul>
     </section>
   </aside>
-  <div id="map"></div>
+  <main id="map-wrap">
+    <div id="map"></div>
+    <div id="draw-hint" hidden>
+      <div><b id="draw-title">Drawing outline</b> ·<span id="draw-count">0 points</span></div>
+      <div class="muted">Click to add points. <b>Double-click</b>, press <kbd>Enter</kbd> or click the first point to finish.</div>
+      <div class="row">
+        <button id="draw-finish" class="primary">Finish <kbd>Enter</kbd></button>
+        <button id="draw-undo">Undo point <kbd>Backspace</kbd></button>
+        <button id="draw-cancel">Cancel <kbd>Esc</kbd></button>
+      </div>
+    </div>
+    <div id="inset-panel" hidden>
+      <div><b id="inset-title">Interior</b> <span class="muted">— a shrunk copy of the outline</span></div>
+      <label>Wall width <span id="inset-val">0 m</span>
+        <input type="range" id="inset-m" min="0" max="50" step="0.5" value="0" /></label>
+      <label>Shift east <span id="shift-x-val">0 m</span>
+        <input type="range" id="shift-x" min="-25" max="25" step="0.5" value="0" /></label>
+      <label>Shift north <span id="shift-y-val">0 m</span>
+        <input type="range" id="shift-y" min="-25" max="25" step="0.5" value="0" /></label>
+      <div class="muted">Arrow keys shift 1 m (Shift: 5 m), <kbd>+</kbd>/<kbd>-</kbd> change the wall width.</div>
+      <div class="row">
+        <button id="inset-apply" class="primary">Use interior <kbd>Enter</kbd></button>
+        <button id="inset-cancel">No interior <kbd>Esc</kbd></button>
+      </div>
+    </div>
+    <div id="toast" hidden></div>
+  </main>
 
   <script>
     window.EW_TYPES = {{ types | tojson }};
     window.EW_NEGATIVES = {{ negatives | tojson }};
     window.EW_UNVERIFIED = {{ unverified | tojson }};
+    window.EW_VIEWS = {{ views.keys() | list | tojson }};
   </script>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
   <script src="https://unpkg.com/@geoman-io/leaflet-geoman-free@2.17.0/dist/leaflet-geoman.min.js"></script>

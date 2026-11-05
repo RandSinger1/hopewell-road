@@ -104,3 +104,12 @@ def rasterize(poly_px: np.ndarray, size: int) -> np.ndarray:
     rr, cc = draw_polygon(poly_px[:, 1] - 0.5, poly_px[:, 0] - 0.5, shape=mask.shape)
     mask[rr, cc] = True
     return mask
+
+
+def rasterize_rings(rings: list[np.ndarray], size: int) -> np.ndarray:
+    """rasterize() of an outline with holes: rings[0] is the exterior, the rest
+    are interiors (e.g. an enclosure's inside) cut out of the mask."""
+    mask = rasterize(rings[0], size)
+    for hole in rings[1:]:
+        mask &= ~rasterize(hole, size)
+    return mask
