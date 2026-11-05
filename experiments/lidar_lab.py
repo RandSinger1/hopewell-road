@@ -39,7 +39,8 @@ from osgeo import gdal
 from pyproj import Transformer
 
 import parameters
-from lidar.tile_filter import tile_file_stem, tile_year
+from lidar import point_io
+from lidar.tile_filter import tile_year
 from experiments import wall_lab
 
 gdal.UseExceptions()
@@ -108,38 +109,13 @@ def _bbox_ft(coord: dict, half_m: float) -> tuple[float, float, float, float]:
 def site_tiles(coord: dict, half_m: float) -> list[dict]:
     """Every saved-list tile whose bbox intersects the site window, deduplicated,
     each with 'local' = an existing raw file (stem or legacy tile_<i> name) or None."""
-    dlat = half_m / 111_320.0
-    dlon = half_m / (111_320.0 * np.cos(np.radians(coord["lat"])))
-    found: dict[str, dict] = {}
-    for lst in sorted(Path("data/saved_file_lists").glob("*.json")):
-        if lst.stem.endswith(("_old", ".unfiltered")):
-            continue
-        raw_dir = Path("data/loaded_tiles") / lst.stem / "raw_tiles"
-        for i, t in enumerate(json.loads(lst.read_text())):
-            if not (t["min_lat"] <= coord["lat"] + dlat and t["max_lat"] >= coord["lat"] - dlat and
-                    t["min_lon"] <= coord["lon"] + dlon and t["max_lon"] >= coord["lon"] - dlon):
-                continue
-            entry = found.setdefault(t["tile_id"], dict(t, local=None))
-            if entry["local"] is None:
-                for p in (raw_dir / f"{tile_file_stem(t['url'])}.laz", raw_dir / f"tile_{i}.laz"):
-                    if p.exists():
-                        entry["local"] = str(p)
-                        break
-    return list(found.values())
+    return point_io.saved_list_tiles(point_io.lonlat_bbox(coord["lat"], coord["lon"], half_m))
 
 
 def _fetch(tile: dict) -> str:
-    if tile["local"]:
-        return tile["local"]
-    import requests
-    dest = CACHE / "laz" / f"{tile_file_stem(tile['url'])}.laz"
-    if not dest.exists():
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        print(f"  downloading {tile['tile_id']} …")
-        r = requests.get(tile["url"], timeout=300)
-        r.raise_for_status()
-        dest.write_bytes(r.content)
-    return str(dest)
+    if not tile["local"]:
+        print(f"  fetching {tile['tile_id']} ...")
+    return str(point_io.fetch_tile(tile, CACHE / "laz"))
 
 
 def _select(tiles: list[dict], collection: str) -> list[dict]:
