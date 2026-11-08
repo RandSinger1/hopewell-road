@@ -2,11 +2,19 @@
 train.py — Train the earthwork Mask R-CNN on a processor dataset.
 
     python -m earthwork_model.train --dataset data/earthworks/dataset/default \
-        [--out data/earthworks/models/default] [--epochs 40] [--device cuda]
+        [--out data/earthworks/models/default] [--epochs 40] [--device cuda] [--resume]
 
 Writes to --out:
     last.pt / best.pt   checkpoints (best = highest validation AP50)
     metrics.csv         per-epoch train loss and validation AP50 / recall
+    train_state.pt      model + optimizer + LR schedule + AMP scaler + RNG after the
+                        last finished epoch (~3x a checkpoint); --resume continues
+                        from it, so an interrupted run (e.g. a Colab session that
+                        timed out) loses at most one epoch.  Delete it when done.
+
+Training needs no GDAL / PDAL: on a machine without them (Colab) only this
+package, earthwork_processor/{features,augment}.py and parameters.py are
+needed — see earthwork_model/colab_bundle.py and colab_train.ipynb.
 
 A GPU is strongly recommended; on CPU an epoch over a few thousand chips
 takes hours.
@@ -82,17 +90,43 @@ def evaluate(model, loader, device) -> tuple[float, float]:
     return average_precision(preds, targets)
 
 
+STATE_FILE = "train_state.pt"
+
+
+def _rng_state() -> dict:
+    return {"python": random.getstate(), "numpy": np.random.get_state(), "torch": torch.get_rng_state(),
+            "cuda": torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None}
+
+
+def _set_rng_state(st: dict) -> None:
+    random.setstate(st["python"])
+    np.random.set_state(st["numpy"])
+    torch.set_rng_state(st["torch"].cpu())
+    if st.get("cuda") is not None and torch.cuda.is_available():
+        torch.cuda.set_rng_state_all([t.cpu() for t in st["cuda"]])
+
+
+def _save_atomic(obj, path: Path) -> None:
+    """Write then rename: a session killed mid-save (Colab) never leaves a truncated file."""
+    tmp = path.with_name(path.name + ".tmp")
+    torch.save(obj, tmp)
+    tmp.replace(path)
+
+
 def train(dataset_dir: Path, out_dir: Path, epochs: int, batch_size: int, lr: float,
-          device: str, workers: int, pretrained: bool) -> Path:
+          device: str, workers: int, pretrained: bool, resume: bool = False) -> Path:
     seed_everything(parameters.EW_SEED)
     manifest = load_manifest(dataset_dir)
     train_ds = ChipDataset(dataset_dir, "train", augment=True)
     val_ds = ChipDataset(dataset_dir, "val")
     if not len(train_ds):
         raise SystemExit("No training chips in the dataset")
+    pin = device.startswith("cuda")
     train_dl = DataLoader(train_ds, batch_size=batch_size, shuffle=True, num_workers=workers,
-                          collate_fn=collate, drop_last=len(train_ds) > batch_size)
-    val_dl = DataLoader(val_ds, batch_size=batch_size, num_workers=workers, collate_fn=collate)
+                          collate_fn=collate, drop_last=len(train_ds) > batch_size, pin_memory=pin,
+                          persistent_workers=workers > 0)
+    val_dl = DataLoader(val_ds, batch_size=batch_size, num_workers=workers, collate_fn=collate,
+                        pin_memory=pin)
 
     model = build_model(len(manifest["classes"]), len(train_ds.channels), manifest["chip_px"],
                         pretrained=pretrained).to(device)
@@ -110,10 +144,34 @@ def train(dataset_dir: Path, out_dir: Path, epochs: int, batch_size: int, lr: fl
     meta["dataset"] = str(dataset_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     best_score = -math.inf
-    with open(out_dir / "metrics.csv", "w", newline="") as fh:
+    start = 1
+    run_cfg = {"dataset": dataset_dir.name, "epochs": epochs, "batch_size": batch_size, "lr": lr,
+               "steps_per_epoch": len(train_dl)}
+    state_path = out_dir / STATE_FILE
+    if resume and state_path.exists():
+        st = torch.load(state_path, map_location=device, weights_only=False)
+        if st["config"] != run_cfg:
+            raise SystemExit(f"{state_path} was saved by a different run:\n  saved {st['config']}\n"
+                             f"  now   {run_cfg}\nUse the same --dataset/--epochs/--batch-size/--lr, "
+                             f"or delete it to start over")
+        model.load_state_dict(st["model"])
+        opt.load_state_dict(st["optimizer"])
+        sched.load_state_dict(st["scheduler"])
+        scaler.load_state_dict(st["scaler"])
+        _set_rng_state(st["rng"])
+        start, best_score = st["epoch"] + 1, st["best_score"]
+        print(f"Resuming from {state_path}: epoch {st['epoch']} done, best score {best_score:.3f}")
+        if start > epochs:
+            print("All epochs already done")
+            return out_dir / "best.pt"
+    elif resume:
+        print(f"No {state_path} yet - starting from epoch 1")
+    resuming = start > 1
+    with open(out_dir / "metrics.csv", "a" if resuming else "w", newline="") as fh:
         log = csv.writer(fh)
-        log.writerow(["epoch", "train_loss", "val_ap50", "val_recall"])
-        for epoch in range(1, epochs + 1):
+        if not resuming:
+            log.writerow(["epoch", "train_loss", "val_ap50", "val_recall"])
+        for epoch in range(start, epochs + 1):
             model.train()
             total, n = 0.0, 0
             for images, tgts in train_dl:
@@ -133,13 +191,19 @@ def train(dataset_dir: Path, out_dir: Path, epochs: int, batch_size: int, lr: fl
             ap, rec = evaluate(model, val_dl, device) if len(val_ds) else (float("nan"), float("nan"))
             log.writerow([epoch, total / max(n, 1), ap, rec])
             fh.flush()
-            print(f"epoch {epoch:3d}  loss {total / max(n, 1):.4f}  val AP50 {ap:.3f}  recall {rec:.3f}")
+            print(f"epoch {epoch:3d}  loss {total / max(n, 1):.4f}  val AP50 {ap:.3f}  recall {rec:.3f}",
+                  flush=True)
             save_checkpoint(out_dir / "last.pt", model, {**meta, "epoch": epoch, "val_ap50": ap})
             # No validation sites → fall back to the lowest training loss
             score = ap if not math.isnan(ap) else -total / max(n, 1)
             if score > best_score:
                 best_score = score
                 save_checkpoint(out_dir / "best.pt", model, {**meta, "epoch": epoch, "val_ap50": ap})
+            # Last: a state file implies its epoch's metrics row and checkpoints are written
+            _save_atomic({"config": run_cfg, "epoch": epoch, "best_score": best_score,
+                          "model": model.state_dict(), "optimizer": opt.state_dict(),
+                          "scheduler": sched.state_dict(), "scaler": scaler.state_dict(),
+                          "rng": _rng_state()}, state_path)
     return out_dir / "best.pt"
 
 
@@ -153,10 +217,13 @@ def main():
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     ap.add_argument("--workers", type=int, default=2, help="DataLoader worker processes")
     ap.add_argument("--no-pretrained", action="store_true", help="Train from scratch (no COCO weights)")
+    ap.add_argument("--resume", action="store_true",
+                    help=f"Continue from --out/{STATE_FILE} if present (same dataset/epochs/batch/lr)")
     args = ap.parse_args()
     out = args.out or parameters.EW_ROOT / "models" / args.dataset.name
     best = train(args.dataset, out, args.epochs, args.batch_size, args.lr, args.device,
-                 args.workers, pretrained=parameters.EW_PRETRAINED and not args.no_pretrained)
+                 args.workers, pretrained=parameters.EW_PRETRAINED and not args.no_pretrained,
+                 resume=args.resume)
     print(f"Best checkpoint: {best}")
 
 

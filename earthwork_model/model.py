@@ -68,7 +68,9 @@ def save_checkpoint(path: Path | str, model: nn.Module, meta: dict) -> None:
     """``meta`` must hold feature_spec, classes, chip_px, channel_mean, channel_std."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    torch.save({"arch": ARCH, "state_dict": model.state_dict(), **meta}, path)
+    tmp = path.with_name(path.name + ".tmp")      # write then rename: never a truncated checkpoint
+    torch.save({"arch": ARCH, "state_dict": model.state_dict(), **meta}, tmp)
+    tmp.replace(path)
 
 
 def load_checkpoint(path: Path | str, device: str = "cpu") -> tuple[nn.Module, dict]:

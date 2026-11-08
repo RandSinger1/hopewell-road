@@ -665,6 +665,12 @@ EW_EARTHWORK_TYPES: list = ["enclosure", "mound", "wall", "road", "other"]
 """Builder 'type' choices for real earthworks.  Descriptive only — they all
 train as 'earthwork' unless listed in EW_CLASSES."""
 
+EW_EXCLUDED_TYPES: list = ["road"]
+"""Earthwork types left out of training: neither targets nor negatives.  No
+chips are centred on them and their pixels are blanked (valid = False) in
+every chip, so the model is not taught they are background either.  Sites
+whose only outlines are excluded still give their background chips."""
+
 EW_NEGATIVE_TYPES: list = ["levee", "rail grade", "road embankment", "field terrace",
                            "spoil / quarry", "not an earthwork"]
 """Builder 'type' choices for look-alikes.  These outlines are never training
@@ -736,6 +742,19 @@ EW_CHIPS_PER_LABEL: int = 12
 EW_CHIPS_PER_NEGATIVE: int = 6
 """Augmented chips centred on each look-alike (EW_NEGATIVE_TYPES) outline."""
 
+EW_MAX_OUTLINE_CHIPS_PER_SITE: int = 36
+"""Cap on a site's outline-centred chips (the EW_CHIPS_PER_LABEL / _NEGATIVE ones).
+Without it chips grow with the number of outlines, and since a dense group puts
+most of its outlines in every chip, *instances* grow with its square: Mound City
+(23 mounds) was 17% of the v1 training chips and 73% of the instances.  Chips
+are taken round-robin over the site's outlines, so a cut keeps them all covered."""
+
+EW_MAX_INSTANCES_PER_SITE: int = 200
+"""Stop adding a site's outline-centred chips once they hold this many target
+instances (counted after clipping to the chip).  Balances instance share
+between dense groups and single mounds: in a v1 simulation, 36 / 200 brings
+Mound City from 73% to ~14% of instances.  Background chips are not limited."""
+
 EW_BACKGROUND_CHIPS_PER_SITE: int = 8
 """Extra chips per site centred at random (most contain no earthwork) — the
 empty-ground examples a detector needs to learn what is *not* an earthwork."""
@@ -802,6 +821,12 @@ EW_EPOCHS: int = 40
 EW_BATCH_SIZE: int = 4
 EW_LEARNING_RATE: float = 1e-4
 EW_WEIGHT_DECAY: float = 1e-4
+
+# Where earthwork_model.colab_bundle writes the Colab upload (code zip, dataset
+# zip, notebook): the Google Drive for desktop folder that Colab sees as
+# /content/drive/MyDrive/khthon (colab_train.ipynb's DRIVE_DIR), so a rebuild
+# lands on Drive with no manual upload.  Use --out to write somewhere else.
+EW_COLAB_DIR: Path = Path("G:/My Drive/khthon")
 
 # ── Statewide scan (earthwork_inference/scan.py) ─────────────────────────────
 

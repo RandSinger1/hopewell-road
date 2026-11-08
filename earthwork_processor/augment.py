@@ -17,13 +17,16 @@ so scale > 1 shows more ground per chip pixel (objects look smaller).
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import numpy as np
 from scipy.ndimage import map_coordinates
 from skimage.draw import polygon as draw_polygon
 
 from earthwork_processor.features import FeatureSpec, compute_features
-from lidar.ground_grid import GroundGrid
+
+if TYPE_CHECKING:     # type hints only: training (dataset.py → rasterize) must import without GDAL (Colab)
+    from lidar.ground_grid import GroundGrid
 
 
 @dataclass(frozen=True)

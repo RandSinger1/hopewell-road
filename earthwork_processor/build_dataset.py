@@ -2,6 +2,7 @@
 build_dataset.py — Turn reviewed builder sites into augmented training chips.
 
     python -m earthwork_processor.build_dataset [--name default] [--only SLUG ...]
+                                                [--classes mound earthwork]
 
 For every site whose labels.geojson is marked reviewed:
   * sites/<slug>/features.tif — the full-window feature stack (one band per
@@ -16,6 +17,14 @@ For every site whose labels.geojson is marked reviewed:
     are also blanked (valid = False) in every chip;
   * EW_BACKGROUND_CHIPS_PER_SITE chips centred at random, which mostly
     contain no earthwork (EW_BACKGROUND_SITE_CHIPS for "background" sites).
+
+Outlines of EW_EXCLUDED_TYPES (e.g. "road") are left out: no chips of their
+own, and their pixels are blanked (valid = False) in every chip.
+
+Outline-centred chips stop at EW_MAX_OUTLINE_CHIPS_PER_SITE chips or
+EW_MAX_INSTANCES_PER_SITE instances per site (taken round-robin over the
+outlines), so a dense mound group cannot dominate: uncapped, Mound City's
+23 mounds were 73% of v1's training instances.
 
 Output: EW_ROOT/dataset/<name>/
     chips/<slug>_<k>.npz   feats (C,N,N) float16, valid (N,N), poly_xy (M,2),
@@ -49,15 +58,19 @@ DATASET_ROOT = parameters.EW_ROOT / "dataset"
 
 LOOKALIKE_MODES = ("hard_negative", "background", "ignore")
 _IGNORE_PAD_PX = 3                 # "ignore" also blanks this margin around a look-alike
+EXCLUDED = -1                      # class_index of an EW_EXCLUDED_TYPES outline
 
 
-def class_index(label_type: str) -> int | None:
-    """Target class of an outline type, or None for a look-alike (hard negative)."""
+def class_index(label_type: str, classes=None) -> int | None:
+    """Target class of an outline type, None for a look-alike (hard negative),
+    EXCLUDED for an EW_EXCLUDED_TYPES outline (blanked, never trained on)."""
     if is_negative(label_type):
         return None
+    if label_type in parameters.EW_EXCLUDED_TYPES:
+        return EXCLUDED
     if label_type == parameters.EW_UNVERIFIED_TYPE:
         raise ValueError(f"'{label_type}' outline in a reviewed site")
-    classes = list(parameters.EW_CLASSES)
+    classes = list(classes or parameters.EW_CLASSES)
     if label_type in classes:
         return classes.index(label_type)
     if "earthwork" in classes:
@@ -75,8 +88,8 @@ def site_split(site: Site) -> str:
     return "val" if h < 1000 * parameters.EW_VAL_FRACTION else "train"
 
 
-def outlines_px(site: Site, grid: GroundGrid) -> list[tuple[list[np.ndarray], int | None]]:
-    """[(rings, class index or None for a look-alike), …]; rings = [exterior, *holes],
+def outlines_px(site: Site, grid: GroundGrid, classes=None) -> list[tuple[list[np.ndarray], int | None]]:
+    """[(rings, class index / None for a look-alike / EXCLUDED), …]; rings = [exterior, *holes],
     each (K, 2) in grid (col, row).  Holes are interiors drawn inside an outline
     (an enclosure's inside): not part of the instance, so they train as background."""
     out = []
@@ -87,7 +100,7 @@ def outlines_px(site: Site, grid: GroundGrid) -> list[tuple[list[np.ndarray], in
             x, y = point_io.lonlat_to_work(lon, lat)
             c, r = grid.to_pixel(x, y)
             rings.append(np.column_stack([c, r]))
-        out.append((rings, class_index(props.get("type", "other"))))
+        out.append((rings, class_index(props.get("type", "other"), classes)))
     return out
 
 
@@ -105,28 +118,39 @@ def _random_transform(rng, col, row, augment: bool) -> ChipTransform:
 
 def chip_plan(rng, grid: GroundGrid, outlines, size: int,
               n_background: int = parameters.EW_BACKGROUND_CHIPS_PER_SITE,
-              lookalikes: str = parameters.EW_LOOKALIKE_TRAINING) -> list[ChipTransform]:
-    """Centres + augmentations for one site's chips."""
-    plan = []
+              lookalikes: str = parameters.EW_LOOKALIKE_TRAINING) -> list[tuple[ChipTransform, bool]]:
+    """Centres + augmentations for one site's chips: [(transform, outline-centred?), ...].
+
+    Outline-centred chips come round-robin over the outlines (in random order):
+    every outline's un-augmented chip first, then each one's first augmented
+    chip, ... — so when build() stops early (EW_MAX_OUTLINE_CHIPS_PER_SITE /
+    EW_MAX_INSTANCES_PER_SITE) the chips it kept still cover all outlines.
+    Background chips follow."""
     half = size / 2
     n_negative = parameters.EW_CHIPS_PER_NEGATIVE if lookalikes == "hard_negative" else 0
+    per_outline = []
     for (poly, *_), cls in outlines:
         centre = poly.mean(axis=0) - 0.5                   # edge → index coords
         radius = np.linalg.norm(poly - poly.mean(axis=0), axis=1).max()
         # Jitter so the outline lands anywhere in the chip while staying (mostly) inside
         max_shift = max(0.0, 0.8 * half - radius)
-        n = parameters.EW_CHIPS_PER_LABEL if cls is not None else n_negative
+        n = (n_negative if cls is None else 0 if cls == EXCLUDED else parameters.EW_CHIPS_PER_LABEL)
+        tfs = []
         for k in range(n):
             shift = np.zeros(2)
             if k:
                 ang, rad = rng.uniform(0, 2 * np.pi), max_shift * np.sqrt(rng.uniform())
                 shift = rad * np.array([np.cos(ang), np.sin(ang)])
-            plan.append(_random_transform(rng, centre[0] + shift[0], centre[1] + shift[1], augment=k > 0))
+            tfs.append(_random_transform(rng, centre[0] + shift[0], centre[1] + shift[1], augment=k > 0))
+        per_outline.append(tfs)
+    order = rng.permutation(len(per_outline)) if per_outline else []
+    rounds = max((len(t) for t in per_outline), default=0)
+    plan = [(per_outline[i][k], True) for k in range(rounds) for i in order if k < len(per_outline[i])]
     rows, cols = np.nonzero(np.isfinite(grid.z))
     if len(rows):
         for _ in range(n_background):
             i = rng.integers(len(rows))
-            plan.append(_random_transform(rng, float(cols[i]), float(rows[i]), augment=True))
+            plan.append((_random_transform(rng, float(cols[i]), float(rows[i]), augment=True), False))
     return plan
 
 
@@ -155,7 +179,9 @@ class _Stats:
 
 
 def build(name: str = "default", only: list[str] | None = None, spec: FeatureSpec | None = None,
-          lookalikes: str = parameters.EW_LOOKALIKE_TRAINING) -> Path:
+          lookalikes: str = parameters.EW_LOOKALIKE_TRAINING, classes=None) -> Path:
+    """classes: target classes, default EW_CLASSES (types not listed train as "earthwork")."""
+    classes = tuple(classes or parameters.EW_CLASSES)
     if lookalikes not in LOOKALIKE_MODES:
         raise ValueError(f"EW_LOOKALIKE_TRAINING must be one of {LOOKALIKE_MODES}, not {lookalikes!r}")
     spec = spec or FeatureSpec()
@@ -169,7 +195,10 @@ def build(name: str = "default", only: list[str] | None = None, spec: FeatureSpe
     rng = np.random.default_rng(parameters.EW_SEED)
     stats = _Stats(len(spec.channels))
     manifest = {"feature_spec": spec.to_dict(), "chip_px": size,
-                "classes": list(parameters.EW_CLASSES), "lookalikes": lookalikes,
+                "classes": list(classes), "lookalikes": lookalikes,
+                "excluded_types": list(parameters.EW_EXCLUDED_TYPES),
+                "max_outline_chips_per_site": parameters.EW_MAX_OUTLINE_CHIPS_PER_SITE,
+                "max_instances_per_site": parameters.EW_MAX_INSTANCES_PER_SITE,
                 "sites": {}, "chips": []}
 
     for site in load_sites():
@@ -197,12 +226,15 @@ def build(name: str = "default", only: list[str] | None = None, spec: FeatureSpe
         feats, _ = compute_features(grid.z, spec)
         grid.to_geotiff(site.dir / "features.tif", bands=feats, band_names=list(spec.channels))
 
-        outlines = outlines_px(site, grid)
+        outlines = outlines_px(site, grid, classes)
         split = site_split(site)
-        n = 0
+        n = n_outline_chips = n_instances = 0
         all_rings = [ring for rings, _ in outlines for ring in rings]
         n_bg = parameters.EW_BACKGROUND_SITE_CHIPS if site.background else parameters.EW_BACKGROUND_CHIPS_PER_SITE
-        for tf in chip_plan(rng, grid, outlines, size, n_bg, lookalikes):
+        for tf, outline_centred in chip_plan(rng, grid, outlines, size, n_bg, lookalikes):
+            if outline_centred and (n_outline_chips >= parameters.EW_MAX_OUTLINE_CHIPS_PER_SITE
+                                    or n_instances >= parameters.EW_MAX_INSTANCES_PER_SITE):
+                continue                      # site has its share - keep dense groups from dominating
             f, valid, flat = make_chip(grid, tf, spec, size, all_rings, rng)
             if valid.mean() < 0.5:
                 continue
@@ -210,8 +242,8 @@ def build(name: str = "default", only: list[str] | None = None, spec: FeatureSpe
             blank = np.zeros((size, size), bool)
             for rings, cls in outlines:
                 chip_rings, k = flat[k:k + len(rings)], k + len(rings)
-                if cls is None:
-                    if lookalikes == "ignore":
+                if cls is None or cls == EXCLUDED:
+                    if cls == EXCLUDED or lookalikes == "ignore":
                         blank |= rasterize_rings(chip_rings, size)
                 elif rasterize_rings(chip_rings, size).sum() >= parameters.EW_MIN_INSTANCE_PX:
                     keep.append((chip_rings, cls))
@@ -236,12 +268,18 @@ def build(name: str = "default", only: list[str] | None = None, spec: FeatureSpe
             if split == "train":
                 stats.add(f, valid)
             n += 1
+            n_instances += len(keep)
+            n_outline_chips += outline_centred
         n_neg = sum(cls is None for _, cls in outlines)
-        manifest["sites"][site.slug] = {"split": split, "labels": len(outlines) - n_neg,
-                                        "lookalikes": n_neg, "chips": n, "background": site.background}
+        n_excl = sum(cls == EXCLUDED for _, cls in outlines)
+        n_lab = len(outlines) - n_neg - n_excl
+        manifest["sites"][site.slug] = {"split": split, "labels": n_lab, "lookalikes": n_neg,
+                                        "excluded": n_excl, "chips": n, "instances": n_instances,
+                                        "background": site.background}
         kind = " (background site)" if site.background else ""
-        print(f"[{site.name}] {split}{kind}: {len(outlines) - n_neg} earthwork(s), "
-              f"{n_neg} look-alike(s) -> {n} chips")
+        excl = f", {n_excl} excluded" if n_excl else ""
+        print(f"[{site.name}] {split}{kind}: {n_lab} earthwork(s), "
+              f"{n_neg} look-alike(s){excl} -> {n} chips, {n_instances} instances")
 
     if not manifest["chips"]:
         raise SystemExit("No chips written - are any sites prepared and marked reviewed?")
@@ -260,8 +298,11 @@ def main():
     ap.add_argument("--only", nargs="+", metavar="SLUG", help="Only these sites")
     ap.add_argument("--lookalikes", choices=LOOKALIKE_MODES, default=parameters.EW_LOOKALIKE_TRAINING,
                     help="How look-alike outlines train (default: EW_LOOKALIKE_TRAINING)")
+    ap.add_argument("--classes", nargs="+", metavar="CLASS",
+                    help="Target classes (default: EW_CLASSES), e.g. --classes mound earthwork: "
+                         "types not listed train as 'earthwork'")
     args = ap.parse_args()
-    build(args.name, args.only, lookalikes=args.lookalikes)
+    build(args.name, args.only, lookalikes=args.lookalikes, classes=args.classes)
 
 
 if __name__ == "__main__":
