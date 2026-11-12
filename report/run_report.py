@@ -41,7 +41,6 @@ from .cross_sections import generate_cross_section_figure
 from .extra_views import generate_extra_views
 from .overview_map import generate_overview_map
 from .report_utils import site_paths
-from .generate_report_doc import generate_report_doc
 
 _ALL_PATHS = ("circleville", "chillicothe", "high_banks")
 _REPO_REPORT = Path(__file__).resolve().parent

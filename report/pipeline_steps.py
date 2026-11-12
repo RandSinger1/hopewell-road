@@ -29,22 +29,6 @@ from . import config as cfg
 import parameters
 
 
-_STEP_LABELS = [
-    "1. Raw DTM",
-    "2. Median Smooth",
-    "3. Local Relief Model",
-    "4. Frangi Ridge Response",
-    "5. Ridge Amplitude Threshold",
-    "6. Hessian Orientation",
-    "7. Angle Deviation",
-    "8. Binary Mask",
-    "9. Along-Wall Gap Fill",
-    "10. Skeleton",
-    "11. Labeled Components",
-    "12. Detected Pairs",
-    "13. Hillshade ⊥ 32°",
-]
-
 # Slugs follow flat axis order (left-to-right, top-to-bottom in a 4×3 grid).
 # Panel 13 (hillshade_perp32) is saved separately, not in the grid.
 _STEP_SLUGS = [

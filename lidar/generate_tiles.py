@@ -1,13 +1,9 @@
 import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-import laspy
-import numpy as np
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
-from io import BytesIO
-from urllib.parse import urlparse
 from pathlib import Path
 
 from lidar.tile_filter import tile_file_stem
@@ -18,37 +14,6 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Generate tiles from LAZ files")
     parser.add_argument("area", type=str, help="Area name to process")
     return parser.parse_args()
-
-
-def is_url(path):
-    try:
-        parsed = urlparse(str(path))
-        return parsed.scheme in ("http", "https")
-    except Exception:
-        return False
-
-
-def locate_file(path):
-    path_obj = Path(path)
-    if path_obj.exists():
-        return str(path_obj)
-    alt_path = Path.cwd() / path
-    if alt_path.exists():
-        return str(alt_path)
-    return None
-
-
-def open_image_source(path):
-    if is_url(path):
-        resp = requests.get(path, timeout=10)
-        resp.raise_for_status()
-        laz_data = laspy.read(BytesIO(resp.content))
-    else:
-        tile_file = locate_file(path)
-        if tile_file is None:
-            raise FileNotFoundError(f"Could not locate tile file: {path}")
-        laz_data = laspy.read(tile_file)
-    return laz_data
 
 
 def _make_session():

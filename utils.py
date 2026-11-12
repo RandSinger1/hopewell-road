@@ -5,11 +5,6 @@ FEET = 0
 METERS = 1
 DEGREES = 2
 PIXELS = 3
-def feet_to_degrees(feet_x, feet_y, ref_lat):
-    """Convert feet to approximate degrees at given latitude."""
-    delta_lat = feet_y / 364000.0
-    delta_lon = feet_x / (364000.0 * np.cos(np.radians(ref_lat)))
-    return delta_lon, delta_lat
 def meters_to_degrees(meters_x, meters_y, ref_lat):
     """Convert meters to approximate degrees at given latitude."""
     delta_lat = meters_y / 111320.0
@@ -289,20 +284,3 @@ def annotate_lines_corridor(lines, curve_func, curve_deriv_fn, lat_m=111_320.0):
         ln["expected_angle"] = corridor_angle_at(curve_deriv_fn, mid_lon)
         ln["corridor_dist_m"] = abs(mid_lat - curve_func(mid_lon)) * lat_m
 
-
-def make_gdal_progress_callback(label: str = "Progress"):
-    """Return a GDAL-compatible progress callback that prints percentage updates.
-
-    Usage:
-        gdal.Warp(..., callback=make_gdal_progress_callback("Merge"))
-    """
-    state = {"last_pct": -1}
-
-    def callback(complete, message, user_data):
-        pct = int(complete * 100)
-        if pct != state["last_pct"]:
-            print(f"{label}: {pct}% - {message}")
-            state["last_pct"] = pct
-        return 1   # 1 = continue, 0 = cancel
-
-    return callback

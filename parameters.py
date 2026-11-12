@@ -21,7 +21,6 @@ The statewide earthwork detector (formerly §10 here) lives in the sibling
 earthworks repo, with its own parameters.py.
 """
 
-from pathlib import Path
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -35,11 +34,6 @@ METERS_PER_DEGREE_LAT: float = 111_320.0
 
 METERS_PER_DEGREE_LON_AT_40N: float = 85_000.0
 """Metres per degree of longitude at ~40 °N  (≈ cos(40°) × 111 320)."""
-
-# Approximate centre of the Hopewell Road study corridor.
-# Used as the reference latitude in unit-conversion helpers.
-STUDY_CENTER_LAT: float = 40.0
-STUDY_CENTER_LON: float = -82.4
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -138,22 +132,11 @@ when the CRS cannot be read from the file metadata.  EPSG:6551 """
 # ── Point access (lidar/point_io.py — used by experiments/lidar_lab.py) ───────
 
 POINT_WORK_CRS: str = "EPSG:6346"
-"""Metric CRS point_io returns ``xyz`` in: NAD83(2011) / UTM 17N, Z in metres
-(tiles arrive in Ohio North *or* South ftUS)."""
+"""Metric CRS in which point_io compares a LAZ file's header extent with its listing
+(NAD83(2011) / UTM 17N; tiles arrive in Ohio North *or* South ftUS)."""
 
 POINT_FALLBACK_SRS: str = "EPSG:6551+6360"
 """CRS assumed for a LAZ tile whose header carries none (Ohio South ftUS + NAVD88 ftUS)."""
-
-POINT_TILE_CACHE: Path = Path("data/tile_cache")
-"""Default download folder of point_io.fetch_tile (lidar_lab passes its own)."""
-
-POINT_COLLECTION_PREFIX: str = "OH_Statewide"
-"""point_io.statewide_only / find_tiles keep collections whose name starts with this
-(the OSIP III 2020/2021 QL2 flights)."""
-
-POINT_FALLBACK_COLLECTIONS: bool = True
-"""point_io.find_tiles fills the part of a window no statewide tile covers from the
-newest non-legacy collection there."""
 
 # ── Warp / mosaic settings (gdal.Warp) ───────────────────────────────────────
 
@@ -208,12 +191,6 @@ SCAN_RIDGE_SCALES: list = [4]
 """Ridge scales (σ, pixels; 4 px ≈ 1.2 m) used during the fast area scan
 (range_searcher.py).  Single scale is ~4× faster than the full RIDGE_SCALES set."""
 
-SVF_RADIUS: int = 15
-"""Maximum horizon-search radius (pixels; 15 px ≈ 4.6 m) for sky-view factor."""
-
-SVF_DIRECTIONS: int = 16
-"""Number of azimuth directions sampled per cell for sky-view factor."""
-
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # §5  RIDGE / SKELETON DETECTION  (ridge_detection.py)
@@ -253,10 +230,6 @@ RIDGE_THRESHOLD: float = .1
 normalised per window, not an elevation) for a pixel to enter the binary
 ridge mask.  Lower → more candidates, more false positives."""
 
-MORPH_DISK_RADIUS: float = 10
-"""Structuring-element radius (pixels; ≈ 3 m) for binary closing.  Currently
-unused by ridge_detection.py (along-wall gap filling replaced it); only
-re-exported via report/config.py."""
 
 BINARY_MIN_OBJECT_SIZE: int = 200
 """Connected components with fewer than this many pixels are removed before
@@ -345,14 +318,6 @@ a tile boundary from being missed entirely."""
 SCAN_MAX_WORKERS: int = 10
 """Maximum parallel worker processes for the tile scan."""
 
-SCAN_POLYGON: list = [
-    # (lat, lon) vertices that bound the search area.
-    (39.5,  -82.9),   # Circleville
-    (40.0,  -82.4),    # Newark
-    (39.3,  -82.9),    # Chillicothe
-]
-"""Polygon vertices (lat, lon) bounding the Hopewell Road study corridor.
-Tiles whose centres fall outside this polygon are skipped."""
 
 # ── Named anchor coordinates ──────────────────────────────────────────────────
 
@@ -430,9 +395,6 @@ HILLSHADE_Z_FACTOR: float = 4.0
 """Vertical exaggeration applied to the DTM before hillshading in the tile
 renderer.  Higher values make earthworks more visible at small scales."""
 
-DTM_MAX_READ_DIM: int = 3000
-"""Maximum pixels per axis when reading the DTM at reduced resolution for
-global elevation-range statistics.  Caps memory use on very large mosaics."""
 
 PREWARM_ZOOM_SCHEDULE: list = [
     # (zoom_level, corridor_buffer_km) — finer zooms with shrinking buffers
@@ -453,8 +415,6 @@ REPORT_DTM_PATH: str = "data/loaded_tiles/Whole_Road/merged_dtm.tif"
 """Path to the merged DTM for the report (relative to repo root).
 Can differ from SCAN_DTM_PATH if a higher-resolution mosaic is available."""
 
-REPORT_OUTPUT_DIR: Path = Path("report/output")
-"""Root directory for all generated report figures (relative to repo root)."""
 
 REPORT_DPI: int = 150
 """Resolution for saved report figures (dots per inch)."""

@@ -6,7 +6,6 @@ import logging
 import math
 import os
 import pickle
-import sys
 import numpy as np
 from PIL import Image
 
@@ -507,36 +506,9 @@ def _hillshade(elev: np.ndarray, mask: np.ndarray,
     return hs
 
 
-def _terrain_rgb(elev: np.ndarray, mask: np.ndarray,
-                 lo: float = None, hi: float = None) -> np.ndarray:
-    valid = elev[~mask]
-    if valid.size == 0:
-        return np.zeros((*elev.shape, 3), dtype=np.float32)
-
-    if lo is None or hi is None:
-        lo, hi = np.percentile(valid, [2, 98])
-
-    span = hi - lo if hi > lo else 1.0
-    t = np.clip((elev - lo) / span, 0.0, 1.0)
-
-    # 8-stop vivid ramp: deep blue → teal → vivid green → lime → gold → orange → red → snow
-    stops_t = np.array([0.00, 0.10, 0.22, 0.38, 0.54, 0.70, 0.87, 1.0])
-    stops_r = np.array([   8,  18,   55, 150,  245, 255,  205, 255], dtype=np.float32)
-    stops_g = np.array([  28, 108,  170, 215,  210, 130,   40, 255], dtype=np.float32)
-    stops_b = np.array([ 118, 150,   70,  25,   15,   5,   15, 255], dtype=np.float32)
-
-    flat = t.ravel()
-    r = np.interp(flat, stops_t, stops_r).reshape(elev.shape)
-    g = np.interp(flat, stops_t, stops_g).reshape(elev.shape)
-    b = np.interp(flat, stops_t, stops_b).reshape(elev.shape)
-    return np.stack([r, g, b], axis=-1)
-
-
 # ---------------------------------------------------------------------------
 # Low-res read helper (used only for elevation range stats)
 # ---------------------------------------------------------------------------
-
-MAX_DIM = parameters.DTM_MAX_READ_DIM
 
 
 def _read(path: str, max_dim: int):

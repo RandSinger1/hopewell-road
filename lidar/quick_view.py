@@ -5,7 +5,6 @@ View a large DTM (GeoTIFF) at low resolution with proper coordinate axes.
 Usage: python quick_view_dtm.py dtm_file.tif [--step STEP] [--cmap JET]
 """
 
-import sys
 import argparse
 import numpy as np
 from osgeo import gdal

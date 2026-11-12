@@ -89,15 +89,6 @@
             "justMyCode": false
         },
         {
-            "name": "Road Model: Ridge Detection + Road Modeler",
-            "type": "debugpy",
-            "request": "launch",
-            "module": "road_model.road_modeler",
-            "cwd": "${workspaceFolder}",
-            "console": "integratedTerminal",
-            "justMyCode": false
-        },
-        {
             "name": "Road Model: Chillicothe Range Searcher",
             "type": "debugpy",
             "request": "launch",

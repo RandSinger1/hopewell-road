@@ -33,13 +33,13 @@ hopewell-road/
 ├── lidar/                   Step-by-step pipeline scripts
 │   ├── collect_images.py    Query USGS ScienceBase for LAZ tile URLs
 │   ├── generate_tiles.py    Download LAZ tiles in parallel
-│   ├── pdal_pipeline.py     Denoise → ground classify (SMRF) → DTM → mosaic
-│   ├── merge_multiple_areas.py  Merge per-area sub-mosaics
+│   ├── pdal_pipeline.py     Denoise → ground classify (SMRF) → DTM → mosaic (merges sub-areas)
+│   ├── point_io.py          Tile lookup + download for experiments/lidar_lab.py
 │   ├── quick_view.py        Low-resolution DTM preview image
 │   └── run_pipeline.py      One-shot runner for the full pipeline
 │
 ├── road_model/              Feature-detection algorithms
-│   ├── process_dtm.py       Shared raster helpers (LRM, SVF, Frangi ridge)
+│   ├── process_dtm.py       Shared raster helpers (median smoothing, LRM, Frangi ridge)
 │   ├── ridge_detection.py   Hessian ridge + parallel-wall pairing
 │   ├── road_modeler.py      Template matched-filter (NCC) detector
 │   └── range_searcher.py    Tile-parallel corridor scan
@@ -195,32 +195,32 @@ Downloads LAZ tiles to `data/loaded_tiles/<area>/raw_tiles/`.
 ### 3. Process point clouds → DTM
 
 ```bash
-python -m lidar.pdal_pipeline
+python -m lidar.pdal_pipeline Hopewell_Road --area-splits 15
+python -m lidar.pdal_pipeline full_road --area-splits 15     # Hopewell_Road + Circleville_Road
 ```
 
-Edit the `areas` list at the bottom of the script.  Outputs `merged_dtm.tif`
-per area under `data/loaded_tiles/<area>/`.
+Per sub-area: denoise → SMRF ground → per-tile DTMs, then warps and mosaics every
+sub-area into one `merged_dtm.tif` (`full_road` → `data/loaded_tiles/Whole_Road/`).
 
-### 4. Merge sub-areas (optional)
+### 4. Scan the corridor for wall pairs
 
 ```bash
-python -m lidar.merge_multiple_areas
+python -m road_model.range_searcher --mode chillicothe     # or circleville / high_banks / polygon
 ```
 
-Merges `Circleville_Road_0` … `Circleville_Road_9` into
-`data/loaded_tiles/Circleville_Road/merged_dtm.tif`.
+Tiles the corridor and runs the Hessian ridge + parallel-wall pairing detector
+(`road_model/ridge_detection.py`) on each tile; writes PNG overlays and
+`line_overlay.json` files to `data/locations/<mode>_<w>_<h>/`.  The template
+matched-filter detector (`road_model/road_modeler.py`,
+`detect_parallel_walls_template`) is a library alternative with no command of
+its own (settings: `parameters.py` §6).
 
-### 5. Detect features
+### 5. Report
 
 ```bash
-# Hessian ridge + parallel-wall pairing
-python -m road_model.ridge_detection
-
-# Template matched-filter (NCC) detector
-python -m road_model.road_modeler
+python -m report.run_report --path chillicothe       # figures per REPORT_COORDS site
+python -m report.generate_report_doc                 # .docx per corridor path
 ```
-
-Both write PNG overlays and JSON coordinate files to `data/locations/`.
 
 ### 6. Quick preview
 
@@ -259,8 +259,8 @@ Key sections:
 | §3 Point-cloud ingestion | SMRF ground classification, outlier removal, point_io access |
 | §4 DTM pre-processing | LRM radius, Frangi ridge scales |
 | §5 Ridge detection | `SPACING_METERS`, `ROAD_BEARING_DEG`, angle tolerance |
-| §6 Template matching | NCC kernel geometry, score threshold |
-| §7 Area scan | Scan tile size, corridor polygon |
+| §6 Template matching | NCC kernel geometry, score threshold (road_modeler defaults) |
+| §7 Area scan | Scan tile size, overlap, corridor anchors, parabola coefficients |
 | §8 Map viewer | Port, hillshade settings, tile renderer |
 | §9 Report | Output coords, DPI, cross-section offsets |
 

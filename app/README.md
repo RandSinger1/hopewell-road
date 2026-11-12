@@ -60,7 +60,7 @@ app/
 Both `line_0` and `line_1` of each pair are drawn as individual segments.
 
 **DTM** — any GeoTIFF in WGS-84 (EPSG:4326), typically a `merged_dtm.tif` produced
-by `pdal_pipeline.py` / `merge_multiple_areas.py`.  It is rendered once at startup
+by `lidar/pdal_pipeline.py`.  It is rendered once at startup
 (hillshade + terrain colour ramp) and served as a Leaflet image overlay.
 
 ## Map controls

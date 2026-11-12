@@ -4,11 +4,9 @@ from pathlib import Path
 import numpy as np
 import cv2
 from scipy.ndimage import gaussian_filter, map_coordinates
-from skimage.morphology import remove_small_objects, medial_axis, disk, closing
+from skimage.morphology import remove_small_objects, medial_axis
 from skimage.measure import label as label_function, regionprops
-from sklearn.linear_model import RANSACRegressor
-import matplotlib.pyplot as plt
-from utils import convert_meters_degrees_pixels, METERS, PIXELS, DEGREES, perp_spacing_at_overlap
+from utils import convert_meters_degrees_pixels, METERS, PIXELS, perp_spacing_at_overlap
 from road_model.process_dtm import displayWindow, getGTAndBand, get_window, median_smooth_windowed, local_relief_model, multiscale_ridge_enhancement
 import parameters
 
@@ -31,25 +29,6 @@ def hessian_ridge_orientation(image, sigma=1.0):
     orient = theta + np.pi / 2.0
     orient = np.mod(orient, np.pi)
     return orient.astype(np.float32)
-
-
-def _oriented_line_se(length: int, angle_deg: float) -> np.ndarray:
-    """
-    Build a binary line structuring element of the given pixel length,
-    oriented at angle_deg (degrees CCW from +x, image convention: y down).
-    Used for directional morphological closing to bridge wall gaps without
-    merging cross-cutting landscape features.
-    """
-    size = length | 1          # ensure odd
-    half = size // 2
-    se = np.zeros((size, size), dtype=bool)
-    rad = np.deg2rad(angle_deg)
-    for t in np.linspace(-half, half, size * 4):
-        col = int(round(half + t * np.cos(rad)))
-        row = int(round(half - t * np.sin(rad)))  # y-flip: image y increases downward
-        if 0 <= row < size and 0 <= col < size:
-            se[row, col] = True
-    return se
 
 
 def detect_parallel_walls_ridge_pairing(

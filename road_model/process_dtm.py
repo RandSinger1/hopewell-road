@@ -10,11 +10,9 @@ import numpy as np
 import matplotlib.pyplot as plt
 from osgeo import gdal
 gdal.UseExceptions()
-from scipy.ndimage import gaussian_filter, generic_filter, median_filter, distance_transform_edt
+from scipy.ndimage import gaussian_filter, median_filter, distance_transform_edt
 from scipy.signal import convolve2d
-from xrspatial import sky_view_factor
 from utils import meters_to_degrees, create_parallel_ridge_kernel_compact
-import xarray as xr
 import parameters
 
 
@@ -55,84 +53,6 @@ def getGTAndBand(filepath):
     if nodata is None:
         nodata = -9999
     return gt, band, nodata, ds
-
-
-def filter_image(window, extent, nodata=parameters.NODATA, contours=False, gaussian_smoothing=False,
-                  median_smoothing=False, lrm=False, lrm_radius=parameters.LRM_RADIUS,
-                  svf=False, svf_radius=parameters.SVF_RADIUS, svf_directions=parameters.SVF_DIRECTIONS,
-                  ridge=False, ridge_scales=None,
-                  smoothing_radius=parameters.MEDIAN_SMOOTH_RADIUS, smoothing_sigma=1.0, title=None):
-    """
-    Display a LiDAR window with optional archaeological pre-processing.
-
-    Parameters
-    ----------
-    window : 2D numpy array
-        Elevation raster (rows = y, cols = x). North is the first row.
-    extent : list [xmin, xmax, ymin, ymax]
-        Geographic extent of the raster.
-    nodata : float
-        Value to treat as no data. Masked during computations.
-    contours : bool
-        Overlay contour lines.
-    gaussian_smoothing : bool
-        Apply Gaussian smoothing to the displayed raster.
-    median_smoothing : bool
-        Apply median smoothing to the displayed raster.
-    lrm : bool
-        Compute and display Local Relief Model.
-    lrm_radius : int
-        Radius (in cells) of the mean filter for LRM.
-    svf : bool
-        Compute and display Sky-View Factor.
-    svf_radius : int
-        Search radius (in cells) for horizon calculation.
-    svf_directions : int
-        Number of azimuth directions (e.g. 16).
-    ridge : bool
-        Compute and display multi-scale ridge enhancement (Frangi vesselness).
-    ridge_scales : list of float
-        Sigma values (in cells) for the ridge filter.
-    smoothing_radius : int
-        Radius for initial smoothing.
-    smoothing_sigma : float
-        Sigma for Gaussian kernel.
-    """
-    if ridge_scales is None:
-        ridge_scales = parameters.RIDGE_SCALES
-
-    if gaussian_smoothing:
-        window = gaussian_smooth_windowed(window, nodata=nodata,
-                                          radius=smoothing_radius,
-                                          sigma=smoothing_sigma)
-    elif median_smoothing:
-        window = median_smooth_windowed(window, nodata=nodata, radius=smoothing_radius)
-
-    if lrm:
-        window = local_relief_model(window, radius=lrm_radius, nodata=nodata)
-        print("Displaying Local Relief Model")
-    elif svf:
-        window = sky_view_factor_xr(window, radius=svf_radius, directions=svf_directions, nodata=nodata)
-        print("Displaying Sky-View Factor")
-    elif ridge:
-        window = multiscale_ridge_enhancement(window, scales=ridge_scales, nodata=nodata)
-        print("Displaying Ridge Enhancement")
-
-    plt.figure(figsize=(10, 8))
-    print("Display range: max =", window.max(), "min =", window.min())
-
-    cmap = 'terrain'
-    label = 'Elevation (meters)'
-    if ridge:
-        cmap = 'hot'
-        label = 'Ridgeness'
-    elif svf:
-        cmap = 'gray'
-        label = 'Sky-View Factor'
-
-    window = np.ma.masked_equal(window.astype(float), nodata)
-
-    return window, extent, cmap, label
 
 
 def displayWindow(window, extent, cmap, label=None, contours=False, lines=None,
@@ -230,17 +150,6 @@ def displayWindow(window, extent, cmap, label=None, contours=False, lines=None,
 # Raster processing helpers
 # ----------------------------------------------------------------------
 
-def gaussian_smooth_windowed(data, nodata=parameters.NODATA, radius=parameters.MEDIAN_SMOOTH_RADIUS, sigma=1.0):
-    """Smooth a raster while ignoring nodata values."""
-    mask = data == nodata
-    valid = np.where(mask, 0, data)
-    filtered = gaussian_filter(valid, sigma=sigma, radius=radius)
-    weights = gaussian_filter((~mask).astype(float), sigma=sigma, radius=radius)
-    with np.errstate(divide='ignore', invalid='ignore'):
-        result = np.where(weights > 0, filtered / weights, nodata)
-    result[mask] = nodata
-    return result
-
 
 def median_smooth_windowed(data, nodata=parameters.NODATA, radius=parameters.MEDIAN_SMOOTH_RADIUS):
     """Median filter a raster while ignoring nodata values."""
@@ -281,13 +190,6 @@ def local_relief_model(data, radius=parameters.LRM_RADIUS, nodata=parameters.NOD
 
     lrm[mask] = nodata
     return lrm
-
-
-def sky_view_factor_xr(window, radius=parameters.SVF_RADIUS, directions=parameters.SVF_DIRECTIONS, nodata=parameters.NODATA):
-    da = xr.DataArray(window, dims=["y", "x"])
-    da = da.where(da != nodata)
-    svf = sky_view_factor(agg=da, max_radius=radius, n_directions=directions)
-    return svf.values
 
 
 def multiscale_ridge_enhancement(data, scales=None, nodata=parameters.NODATA):

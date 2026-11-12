@@ -12,7 +12,6 @@ from road_model.ridge_detection import search_region
 from utils import (convert_meters_degrees_pixels, METERS, DEGREES,
                    make_parabola, make_line)
 
-import json
 
 # ── Named coordinates ─────────────────────────────────────────────────────────
 # Single source of truth: parameters.py

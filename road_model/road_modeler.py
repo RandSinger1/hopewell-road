@@ -18,6 +18,7 @@ import numpy as np
 import cv2
 from scipy.ndimage import rotate, uniform_filter1d, correlate1d
 from skimage.feature import peak_local_max
+import parameters
 from utils import DEGREES, METERS, PIXELS, convert_meters_degrees_pixels, create_parallel_ridge_kernel_compact
 
 # ----------------------------------------------------------------------
@@ -183,14 +184,14 @@ def detect_rotation(image, angles, length_px, spacing_px, width_px,
 def detect_parallel_walls_template(
     image,
     extent,
-    spacing=38,                # meters
-    wall_width=2,              # meters
-    angle_range=(110, 160),       # degrees CCW from positive x
-    angle_step=1,
-    kernel_length=90,           # meters (can be a list for unknown length)
-    threshold_abs=0.3,
-    min_distance=1,          # meters
-    method='rotation',         # 'cv2_match' or 'rotation'
+    spacing=parameters.TMPL_SPACING_M,               # meters
+    wall_width=parameters.TMPL_WALL_WIDTH_M,         # meters
+    angle_range=parameters.TMPL_ANGLE_RANGE,         # degrees CCW from positive x
+    angle_step=parameters.TMPL_ANGLE_STEP,
+    kernel_length=parameters.TMPL_KERNEL_LENGTH_M,   # meters (can be a list for unknown length)
+    threshold_abs=parameters.TMPL_THRESHOLD,
+    min_distance=parameters.TMPL_MIN_DISTANCE_M,     # meters
+    method=parameters.TMPL_METHOD,                   # 'cv2_match' or 'rotation'
 ):
     """
     Find parallel walls using a matched filter optimised for LiDAR.
