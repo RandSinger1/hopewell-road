@@ -3,8 +3,9 @@ tile_filter.py — Drop LiDAR tiles that a newer collection already covers.
 
 USGS ScienceBase returns every collection that intersects an AOI, so the
 Ohio corridor lists mix the legacy OSIP I flights (OH_SOUTH_2006/2007,
-~1 pt/m²) with the OSIP III statewide flights (OH_Statewide_Phase2_2020 /
-Phase3_2021, QL2).  Mosaicking both lets the sparse legacy surface overwrite
+~0.2-0.3 pts/m² measured at Van Voorhis / Route 40) with the OSIP III statewide
+flights (OH_Statewide_Phase2_2020 / Phase3_2021, QL2: ~8 ground, ~18 total
+pts/m² median).  Mosaicking both lets the sparse legacy surface overwrite
 the newer one wherever it happens to be warped last.
 
 A tile is "superseded" when at least ``threshold`` of its footprint (clipped

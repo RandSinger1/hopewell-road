@@ -1,5 +1,6 @@
 """
-params.py — Single source of truth for every tunable parameter in KhthonLiDAR.
+parameters.py — Single source of truth for every tunable parameter in the
+hopewell-road repo (Great Hopewell Road detection from LiDAR).
 
 All processing scripts, the Flask app, and the report generator import from
 this file.  To change any algorithm setting, edit it here and here only.
@@ -15,8 +16,9 @@ Sections
 7.  Area scan               (range_searcher.py)
 8.  Map viewer / tile server    (app/server.py, app/dtm_renderer.py)
 9.  Report generation       (report/)
-10. Earthwork dataset, model & statewide scan
-                            (earthwork_builder/, earthwork_processor/, earthwork_inference/)
+
+The statewide earthwork detector (formerly §10 here) lives in the sibling
+earthworks repo, with its own parameters.py.
 """
 
 from pathlib import Path
@@ -115,8 +117,9 @@ DTM_RESOLUTION: float = 1.0
 """Output grid cell size in the tiles' CRS units, i.e. US survey FEET:
 1.0 → 0.30 m pixels, which is the pixel size of merged_dtm.tif.  The
 OH_Statewide 2020/2021 data (served via USGS; same data OGRIP distributes) is
-dense enough for this: ~12–22 pts/m² measured at the Van Voorhis / Route 40
-sites.
+dense enough for this: 12.5 / 21.8 pts/m² (all returns), ~8 ground pts/m², at
+the Route 40 / Van Voorhis sites; across the 98 earthwork sites the ground
+(class 2) density has a median of ~8 pts/m² (middle half 6–14).
 
 Per-tile DTMs keep elevations in feet; gdal.Warp to EPSG:4326 in merge_dtms
 converts heights, so merged_dtm.tif elevations (and everything derived from
@@ -131,6 +134,27 @@ DTM_INTERP_METHOD: str = "idw"
 SOURCE_CRS: str = "EPSG:6551"
 """Coordinate reference system of the source LiDAR tiles, used as a fallback
 when the CRS cannot be read from the file metadata.  EPSG:6551 """
+
+# ── Point access (lidar/point_io.py — used by experiments/lidar_lab.py) ───────
+
+POINT_WORK_CRS: str = "EPSG:6346"
+"""Metric CRS point_io returns ``xyz`` in: NAD83(2011) / UTM 17N, Z in metres
+(tiles arrive in Ohio North *or* South ftUS)."""
+
+POINT_FALLBACK_SRS: str = "EPSG:6551+6360"
+"""CRS assumed for a LAZ tile whose header carries none (Ohio South ftUS + NAVD88 ftUS)."""
+
+POINT_TILE_CACHE: Path = Path("data/tile_cache")
+"""Default download folder of point_io.fetch_tile (lidar_lab passes its own)."""
+
+POINT_COLLECTION_PREFIX: str = "OH_Statewide"
+"""point_io.statewide_only / find_tiles keep collections whose name starts with this
+(the OSIP III 2020/2021 QL2 flights)."""
+
+POINT_FALLBACK_COLLECTIONS: bool = True
+"""point_io.find_tiles fills the part of a window no statewide tile covers from the
+newest non-legacy collection there."""
+
 # ── Warp / mosaic settings (gdal.Warp) ───────────────────────────────────────
 
 WARP_RESAMPLE: str = "bilinear"
@@ -596,276 +620,3 @@ the road centreline."""
 
 CROSS_SECTION_N_SAMPLES: int = 160
 """Number of elevation samples per transect."""
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# §10  EARTHWORK DATASET, MODEL & STATEWIDE SCAN
-#      (earthwork_builder/, earthwork_processor/, earthwork_inference/)
-# ═══════════════════════════════════════════════════════════════════════════════
-
-# ── Storage & source data ─────────────────────────────────────────────────────
-
-EW_ROOT: Path = Path("data/earthworks")
-"""Root for everything the earthwork tools write: sites/, dataset/, models/,
-scan/, tile_cache/ (relative to repo root, gitignored with the rest of data/)."""
-
-EW_SITES_FILE: Path = EW_ROOT / "sites.json"
-"""List of known-earthwork coordinates the builder app loads and prepares."""
-
-EW_TILE_CACHE: Path = EW_ROOT / "tile_cache"
-"""Downloaded raw LAZ tiles shared by the builder and the scan."""
-
-EW_COLLECTION_PREFIX: str = "OH_Statewide"
-"""Only tiles from collections whose name starts with this are used (the
-OSIP III 2020/2021 QL2 flights, whose vendor ground class we rely on)."""
-
-EW_FALLBACK_COLLECTIONS: bool = True
-"""Site windows that no EW_COLLECTION_PREFIX tile touches (a few spots OSIP III
-skipped, e.g. Johnson's Island) use the newest non-legacy collection there
-instead (point_io.fallback_collection; recorded as 'collections' in site.json).
-The statewide scan's tile index is OH_Statewide only, so it never scans them."""
-
-EW_GROUND_CLASSES: tuple = (2,)
-"""LAS classes treated as bare earth.  The vendor (OGRIP) class 2 is used
-as-is — no SMRF re-classification."""
-
-EW_WORK_CRS: str = "EPSG:6346"
-"""Metric CRS every earthwork grid lives in: NAD83(2011) / UTM 17N.  One CRS
-for the whole state (tiles arrive in Ohio North *and* Ohio South ftUS), with
-square metre pixels so rotation augmentation is geometrically exact.  West of
-84°W Ohio is technically UTM 16; the 17N scale error there is ~0.1 %."""
-
-EW_FALLBACK_SRS: str = "EPSG:6551+6360"
-"""CRS assumed for a tile whose header carries none (Ohio South ftUS + NAVD88 ftUS)."""
-
-EW_GROUND_SOURCE: str = "points"
-"""Where the ground elevation grid comes from — for training sites AND the scan:
-  "points" — bin the vendor class-2 points of the LAZ tiles (what the labels
-             were drawn on; the scan must download every tile: tens of TB);
-  "dem"    — USGS 3DEP 1 m bare-earth DEM (made from the same flights) via
-             EW_DEM_SERVICE: one request per scan block, point clouds fetched
-             only for candidates — orders of magnitude less download.
-The two are co-registered (~4 cm median offset at Van Voorhis) but the DEM is
-smoother (feature correlation ~0.74), so a model only works on the source it
-was trained on.  The choice is stored in the feature spec, hence in the
-dataset manifest and checkpoint; the scan always uses the checkpoint's source.
-Changing it needs `prepare --force`, a new dataset and retraining."""
-
-EW_DEM_SERVICE: str = "https://elevation.nationalmap.gov/arcgis/rest/services/3DEPElevation/ImageServer"
-"""ArcGIS ImageServer for EW_GROUND_SOURCE = "dem" (exportImage, ≤ 8000 px per side)."""
-
-# ── Sites (earthwork_builder) ─────────────────────────────────────────────────
-
-EW_SITE_HALF_M: float = 500.0
-"""Default half-size (m) of the square window cropped around each site.  Must
-comfortably exceed half the chip diagonal (EW_CHIP_PX·EW_PIXEL_M·0.71) so
-rotated chips still land on data, and include empty ground around the work."""
-
-EW_EARTHWORK_TYPES: list = ["enclosure", "mound", "wall", "road", "other"]
-"""Builder 'type' choices for real earthworks.  Descriptive only — they all
-train as 'earthwork' unless listed in EW_CLASSES."""
-
-EW_EXCLUDED_TYPES: list = ["road"]
-"""Earthwork types left out of training: neither targets nor negatives.  No
-chips are centred on them and their pixels are blanked (valid = False) in
-every chip, so the model is not taught they are background either.  Sites
-whose only outlines are excluded still give their background chips."""
-
-EW_NEGATIVE_TYPES: list = ["levee", "rail grade", "road embankment", "field terrace",
-                           "spoil / quarry", "not an earthwork"]
-"""Builder 'type' choices for look-alikes.  These outlines are never training
-targets; build_dataset centres extra chips on them (hard negatives) so the
-model learns what to ignore."""
-
-EW_UNVERIFIED_TYPE: str = "unverified"
-"""Type given to scan candidates imported into the builder.  A site cannot be
-marked reviewed while any outline still has this type."""
-
-EW_CANDIDATE_HALF_M: float = 300.0
-"""Window half-size (m) for scan candidates imported as builder sites."""
-
-EW_BUILDER_PORT: int = 5001
-"""Port for the earthwork_builder Flask app (the map viewer uses SERVER_PORT)."""
-
-EW_VIZ_Z_FACTOR: float = 3.0
-"""Vertical exaggeration for the builder's hillshade / slope views (earthworks
-are often < 1 m high on near-flat ground)."""
-
-EW_VIZ_ALTITUDE: float = 35.0
-"""Sun altitude (degrees) for the builder's multi-directional hillshade."""
-
-EW_VIZ_LRM_RADIUS_M: float = 10.0
-"""Half-size (m) of the mean surface subtracted for the builder's local-relief view."""
-
-EW_VIZ_CLIP_PCT: float = 98.0
-"""Percentile used to stretch slope and local relief to full contrast per site."""
-
-# ── Ground grid + features (earthwork_processor) ─────────────────────────────
-
-EW_PIXEL_M: float = 1.0
-"""Ground-grid / model pixel size (metres).  Hopewell walls are 5–15 m wide
-and enclosures up to ~400 m across, so 1 m keeps them all inside one chip;
-the 0.30 m DTM used by road_model/ would make chips 11× larger for no gain."""
-
-EW_MAX_FILL_M: float = 5.0
-"""Grid cells with no ground point are filled from the nearest ground cell
-when one is within this distance (m); larger holes (water, buildings) stay NaN."""
-
-EW_NORMAL_RADIUS_M: float = 3.0
-"""Half-size (m) of the neighbourhood whose ground points are PCA'd for the
-surface normal (eigenvector of the smallest eigenvalue).  3 m → a 7×7 window
-at 1 m pixels: wide enough to suppress point noise, narrow enough to keep a
-low wall's flanks."""
-
-EW_LRM_RADIUS_M: float = 15.0
-"""Half-size (m) of the mean surface subtracted for the optional 'lrm' channel."""
-
-EW_CHANNELS: tuple = ("dx", "dy", "magnitude", "lrm", "curvature")
-"""Per-pixel model inputs, in order.  Available (earthwork_processor/features.py):
-  dx, dy      — surface gradient ∂z/∂x (east), ∂z/∂y (north) from the PCA normal
-  magnitude   — |∇z|
-  lrm         — elevation minus EW_LRM_RADIUS_M mean surface (m)
-  curvature   — PCA surface variation λ_min / Σλ (roughness / break of slope)
-lrm and curvature are included because slope alone is dominated by hillsides
-(slope std is only ~0.015 at Van Voorhis) and magnitude is derivable from
-dx, dy; the model's first conv adapts to any channel count.
-Changing this requires rebuilding the dataset and retraining."""
-
-# ── Training chips (earthwork_processor/build_dataset.py) ────────────────────
-
-EW_CHIP_PX: int = 512
-"""Chip edge length in pixels (512 px × 1 m = 512 m)."""
-
-EW_CHIPS_PER_LABEL: int = 12
-"""Augmented chips generated around each labelled polygon."""
-
-EW_CHIPS_PER_NEGATIVE: int = 6
-"""Augmented chips centred on each look-alike (EW_NEGATIVE_TYPES) outline."""
-
-EW_MAX_OUTLINE_CHIPS_PER_SITE: int = 36
-"""Cap on a site's outline-centred chips (the EW_CHIPS_PER_LABEL / _NEGATIVE ones).
-Without it chips grow with the number of outlines, and since a dense group puts
-most of its outlines in every chip, *instances* grow with its square: Mound City
-(23 mounds) was 17% of the v1 training chips and 73% of the instances.  Chips
-are taken round-robin over the site's outlines, so a cut keeps them all covered."""
-
-EW_MAX_INSTANCES_PER_SITE: int = 200
-"""Stop adding a site's outline-centred chips once they hold this many target
-instances (counted after clipping to the chip).  Balances instance share
-between dense groups and single mounds: in a v1 simulation, 36 / 200 brings
-Mound City from 73% to ~14% of instances.  Background chips are not limited."""
-
-EW_BACKGROUND_CHIPS_PER_SITE: int = 8
-"""Extra chips per site centred at random (most contain no earthwork) — the
-empty-ground examples a detector needs to learn what is *not* an earthwork."""
-
-EW_LOOKALIKE_TRAINING: str = "ignore"
-"""How look-alike outlines (EW_NEGATIVE_TYPES) are used in training:
-  "hard_negative" — EW_CHIPS_PER_NEGATIVE extra chips centred on each, so the
-                    model is actively taught to ignore them (fewer false positives);
-  "background"    — no extra chips; a look-alike that happens to fall inside
-                    another chip is ordinary unlabelled ground;
-  "ignore"        — no extra chips, and every chip blanks the look-alike's
-                    pixels (valid = False → channel mean) so the model gets no
-                    signal about it either way.  Most permissive: look-alikes
-                    near known works stay possible detections.
-Changing this needs a dataset rebuild + retraining."""
-
-EW_BACKGROUND_SITE_CHIPS: int = 16
-"""Random chips per *background* site ("background": true in sites.json: a
-window with no known earthwork, picked to show terrain the earthwork windows
-lack).  Used instead of EW_BACKGROUND_CHIPS_PER_SITE for those sites."""
-
-EW_BACKGROUND_MIN_SEP_M: float = 3000.0
-"""add_background --random: minimum distance (m) from a random background
-site to any existing site, so it never overlaps a known earthwork window."""
-
-EW_BACKGROUND_MIN_COVER: float = 0.95
-"""add_background --random: fraction of the window that OH_Statewide tiles must
-cover (rejects points outside Ohio, in Lake Erie, or in coverage gaps)."""
-
-EW_AUG_ROTATION: bool = True
-"""Rotate chips by a uniform random angle (the DTM is rotated, then features
-are recomputed, so the dx/dy vector channels stay consistent)."""
-
-EW_AUG_SCALE: tuple = (0.9, 1.1)
-"""Horizontal scale range.  Kept narrow on purpose: real earthwork size is a
-discriminating cue, and scaling distorts it."""
-
-EW_AUG_Z_EXAGGERATION: tuple = (0.7, 1.5)
-"""Vertical scale range — mimics plough-flattened vs. well-preserved works."""
-
-EW_AUG_NOISE_M: float = 0.02
-"""σ (m) of Gaussian elevation noise added to augmented chips."""
-
-EW_MIN_INSTANCE_PX: int = 40
-"""Drop a label from a chip if fewer than this many of its pixels are visible."""
-
-EW_VAL_FRACTION: float = 0.2
-"""Fraction of *sites* (never chips — chips of one site are near-duplicates)
-held out for validation.  Override per site with "split" in sites.json."""
-
-EW_SEED: int = 0
-"""Seed for chip sampling, splits and training."""
-
-# ── Model & training (earthwork_inference/) ──────────────────────────────────
-
-EW_CLASSES: tuple = ("earthwork",)
-"""Detector classes (background is implicit).  Every labelled polygon maps to
-'earthwork' unless its 'type' is itself listed here."""
-
-EW_PRETRAINED: bool = True
-"""Start from COCO-pretrained Mask R-CNN weights (ResNet-50-FPN v2)."""
-
-EW_EPOCHS: int = 40
-EW_BATCH_SIZE: int = 4
-EW_LEARNING_RATE: float = 1e-4
-EW_WEIGHT_DECAY: float = 1e-4
-
-# Where earthwork_model.colab_bundle writes the Colab upload (code zip, dataset
-# zip, notebook): the Google Drive for desktop folder that Colab sees as
-# /content/drive/MyDrive/khthon (colab_train.ipynb's DRIVE_DIR), so a rebuild
-# lands on Drive with no manual upload.  Use --out to write somewhere else.
-EW_COLAB_DIR: Path = Path("G:/My Drive/khthon")
-
-# ── Statewide scan (earthwork_inference/scan.py) ─────────────────────────────
-
-EW_OHIO_BBOX: tuple = (-84.83, 38.40, -80.51, 41.98)
-"""(min_lon, min_lat, max_lon, max_lat) of Ohio, used to grid index queries
-and scan blocks.  Blocks with no OH_Statewide tiles are skipped."""
-
-EW_INDEX_CELL_DEG: float = 0.1
-"""Cell size (degrees) for gridding ScienceBase index queries; tiles are
-~380 m squares, so a 0.1° cell returns ~600 OH tiles (cap is 5000)."""
-
-EW_SCAN_BLOCK_M: float = 2048.0
-"""Core size (m) of each scan block.  Tiles are only ~380 m, smaller than many
-earthworks, so the scan grids ground from many tiles into one block."""
-
-EW_SCAN_HALO_M: float = 256.0
-"""Extra context (m) read around each block core.  A detection is kept only by
-the block whose core contains its centre, so works up to ~2× this across are
-seen whole and never reported twice."""
-
-EW_SCAN_STRIDE_PX: int = 384
-"""Sliding-window stride inside a block (chip overlap = EW_CHIP_PX − stride)."""
-
-EW_SCORE_THRESHOLD: float = 0.5
-"""Minimum detector score for a candidate to be saved."""
-
-EW_NMS_IOU: float = 0.3
-"""Box IoU above which overlapping detections from adjacent chips are merged."""
-
-EW_MIN_CANDIDATE_M2: float = 5.0
-"""Candidates smaller than this (m²) are discarded."""
-
-EW_CANDIDATE_MARGIN_M: float = 3.0
-"""Margin (m) around a candidate's outline for the saved point-cloud crop."""
-
-EW_TILE_CACHE_GB: float = 40.0
-"""Disk cap for EW_TILE_CACHE during a scan; least-recently-used tiles are
-evicted (raw Ohio LAZ is tens of TB, it cannot all be kept)."""
-
-EW_DOWNLOAD_WORKERS: int = 4
-"""Concurrent tile downloads (the scan prefetches the next block's tiles).
-rockyweb.usgs.gov answers bursts with HTTP 429; 4 matches generate_tiles.py."""

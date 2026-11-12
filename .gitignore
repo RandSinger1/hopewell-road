@@ -52,11 +52,3 @@ experiments/.cache/
 experiments/output/
 experiments/
 
-# Earthwork labels are hand-drawn and irreplaceable: track the site list and
-# each site's labels.geojson (point clouds, grids, chips, models stay ignored)
-!data/earthworks/
-data/earthworks/*
-!data/earthworks/sites/
-data/earthworks/sites/*/*
-!data/earthworks/sites/*/labels.geojson
-earthwork_builder/sites.example.json

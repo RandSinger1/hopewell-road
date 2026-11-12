@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Set up the KhthonLiDAR conda environment on Linux / macOS.
+# Set up the conda environment for the hopewell-road repo on Linux / macOS.
 #
 # Usage:
 #   ./setup_env.sh [env_name [python_version]]
@@ -89,4 +89,4 @@ conda run -n "$ENV_NAME" pip install -r app/requirements.txt
 echo
 echo "Setup complete."
 echo "Activate with:  conda activate $ENV_NAME"
-echo "Run the pipeline:  python run_pipeline.py --help"
+echo "Run the pipeline:  python -m lidar.run_pipeline --help"

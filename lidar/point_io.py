@@ -1,8 +1,9 @@
 """
 point_io.py — Find, download and read USGS LAZ tiles into one metric CRS.
 
-Shared by experiments/lidar_lab.py (site crops), earthwork_builder/ (site
-point clouds) and earthwork_inference/scan.py (statewide blocks).
+Used by experiments/lidar_lab.py (site crops).  The earthworks repo has its
+own copy (site point clouds, statewide scan): fixes to the tile lookup /
+download logic belong in both.
 
 All LAZ reading and writing goes through PDAL (laspy has no LAZ backend in
 pdal_env).  Every reader returns two views of the same points:
@@ -10,7 +11,7 @@ pdal_env).  Every reader returns two views of the same points:
   * ``points`` — the PDAL structured array, untouched, in the tile's own CRS
     and units (Ohio North/South ftUS).  This is what gets written back out,
     so saved crops keep every attribute at full fidelity.
-  * ``xyz``    — (N, 3) float64 in ``parameters.EW_WORK_CRS`` (UTM 17N) with
+  * ``xyz``    — (N, 3) float64 in ``parameters.POINT_WORK_CRS`` (UTM 17N) with
     Z in metres.  This is what ground grids and features are built from.
 
 The XY transform is done with pyproj on the horizontal CRS only and Z is
@@ -92,7 +93,7 @@ def query_tiles(bbox: tuple[float, float, float, float], retries: int = 5) -> li
     return []
 
 
-def statewide_only(tiles: list[dict], prefix: str = parameters.EW_COLLECTION_PREFIX) -> list[dict]:
+def statewide_only(tiles: list[dict], prefix: str = parameters.POINT_COLLECTION_PREFIX) -> list[dict]:
     """Keep tiles from the OSIP III statewide collections."""
     return [t for t in tiles if collection_of(t).startswith(prefix)]
 
@@ -103,7 +104,7 @@ def _collection_year(name: str) -> int:
 
 
 def work_box(t: dict):
-    """A listing's footprint (its lon/lat bbox) as a shapely box in EW_WORK_CRS."""
+    """A listing's footprint (its lon/lat bbox) as a shapely box in POINT_WORK_CRS."""
     import shapely
     xs, ys = lonlat_to_work(np.array([t["min_lon"], t["max_lon"], t["max_lon"], t["min_lon"]]),
                             np.array([t["min_lat"], t["min_lat"], t["max_lat"], t["max_lat"]]))
@@ -149,7 +150,7 @@ def fill_tiles(window, covered, candidates: list[dict], min_frac: float = 0.002)
     gap = window.difference(covered)
     out = []
     modern = [t for t in candidates if "/legacy/" not in t["url"]
-              and not collection_of(t).startswith(parameters.EW_COLLECTION_PREFIX)]
+              and not collection_of(t).startswith(parameters.POINT_COLLECTION_PREFIX)]
     for coll in sorted({collection_of(t) for t in modern}, key=lambda c: (-_collection_year(c), c)):
         if gap.area < min_frac * window.area:
             break
@@ -169,7 +170,7 @@ def shapely_union(geoms):
 
 
 def find_tiles(bbox: tuple[float, float, float, float],
-               fallback: bool = parameters.EW_FALLBACK_COLLECTIONS,
+               fallback: bool = parameters.POINT_FALLBACK_COLLECTIONS,
                window=None) -> list[dict]:
     """Statewide tiles covering ``bbox``.  ScienceBase is authoritative (the saved
     lists only cover the corridor AOIs, so they can cover a site partially);
@@ -203,7 +204,7 @@ def local_tile_paths() -> dict[str, str]:
 
 # ─── Download ─────────────────────────────────────────────────────────────────
 
-def fetch_tile(tile: dict, cache_dir: Path = parameters.EW_TILE_CACHE, attempts: int = 4) -> Path:
+def fetch_tile(tile: dict, cache_dir: Path = parameters.POINT_TILE_CACHE, attempts: int = 4) -> Path:
     """Local path of a tile, downloading it into ``cache_dir`` if needed.
 
     Writes to a .part file and renames, so an interrupted download is never
@@ -248,7 +249,7 @@ def fetch_tile(tile: dict, cache_dir: Path = parameters.EW_TILE_CACHE, attempts:
     return dest
 
 
-def cache_path(tile: dict, cache_dir: Path = parameters.EW_TILE_CACHE) -> Path:
+def cache_path(tile: dict, cache_dir: Path = parameters.POINT_TILE_CACHE) -> Path:
     """Cache file of a listing: the USGS file stem, plus the delivery block for
     ``variant`` listings (two different files sharing one tile id)."""
     stem = tile_file_stem(tile["url"])
@@ -256,9 +257,9 @@ def cache_path(tile: dict, cache_dir: Path = parameters.EW_TILE_CACHE) -> Path:
 
 
 def file_work_bounds(path: Path | str) -> tuple[float, float, float, float]:
-    """(xmin, ymin, xmax, ymax) of a LAZ file's header, in EW_WORK_CRS (header-only read)."""
+    """(xmin, ymin, xmax, ymax) of a LAZ file's header, in POINT_WORK_CRS (header-only read)."""
     p = pdal.Pipeline(json.dumps([{"type": "readers.las", "filename": str(path), "count": 0,
-                                   "default_srs": parameters.EW_FALLBACK_SRS}]))
+                                   "default_srs": parameters.POINT_FALLBACK_SRS}]))
     p.execute()
     md = p.metadata["metadata"]["readers.las"]
     crs = parse_crs(_srs_wkt(p.metadata))
@@ -300,7 +301,7 @@ class TileCRS:
 
 @lru_cache(maxsize=16)
 def parse_crs(wkt: str) -> TileCRS:
-    crs = CRS.from_user_input(wkt or parameters.EW_FALLBACK_SRS)
+    crs = CRS.from_user_input(wkt or parameters.POINT_FALLBACK_SRS)
     subs = crs.sub_crs_list or [crs]
     horiz = subs[0]
     vert = subs[1] if len(subs) > 1 else None
@@ -318,15 +319,15 @@ def _transformer(src_wkt: str, dst: str) -> Transformer:
 
 
 def to_work(x: np.ndarray, y: np.ndarray, crs: TileCRS,
-            work_crs: str = parameters.EW_WORK_CRS) -> tuple[np.ndarray, np.ndarray]:
+            work_crs: str = parameters.POINT_WORK_CRS) -> tuple[np.ndarray, np.ndarray]:
     return _transformer(crs.horizontal.to_wkt(), work_crs).transform(x, y)
 
 
-def work_to_lonlat(x, y, work_crs: str = parameters.EW_WORK_CRS):
+def work_to_lonlat(x, y, work_crs: str = parameters.POINT_WORK_CRS):
     return _transformer(CRS.from_user_input(work_crs).to_wkt(), "EPSG:4326").transform(x, y)
 
 
-def lonlat_to_work(lon, lat, work_crs: str = parameters.EW_WORK_CRS):
+def lonlat_to_work(lon, lat, work_crs: str = parameters.POINT_WORK_CRS):
     return _transformer(CRS.from_user_input("EPSG:4326").to_wkt(), work_crs).transform(lon, lat)
 
 
@@ -355,7 +356,7 @@ def read_tile(path: Path | str, classes: tuple | None = None,
     """Read one LAZ tile.  ``classes`` keeps only those LAS classes;
     ``work_bounds`` = (xmin, ymin, xmax, ymax) in the work CRS crops to a box."""
     stages: list[dict] = [{"type": "readers.las", "filename": str(path),
-                           "default_srs": parameters.EW_FALLBACK_SRS}]
+                           "default_srs": parameters.POINT_FALLBACK_SRS}]
     if classes:
         stages.append({"type": "filters.range",
                        "limits": ",".join(f"Classification[{c}:{c}]" for c in classes)})
@@ -464,11 +465,11 @@ def crop_tiles_to_laz(paths: list, work_bounds: tuple[float, float, float, float
 def iter_xyz(path: Path | str, classes: tuple | None = None, chunk_size: int = 2_000_000):
     """Work-CRS (N, 3) xyz of a LAZ file, chunk by chunk (constant memory)."""
     head = pdal.Pipeline(json.dumps([{"type": "readers.las", "filename": str(path), "count": 0,
-                                      "default_srs": parameters.EW_FALLBACK_SRS}]))
+                                      "default_srs": parameters.POINT_FALLBACK_SRS}]))
     head.execute()
     crs = parse_crs(_srs_wkt(head.metadata))
     stages: list[dict] = [{"type": "readers.las", "filename": str(path),
-                           "default_srs": parameters.EW_FALLBACK_SRS}]
+                           "default_srs": parameters.POINT_FALLBACK_SRS}]
     if classes:
         stages.append({"type": "filters.range",
                        "limits": ",".join(f"Classification[{c}:{c}]" for c in classes)})

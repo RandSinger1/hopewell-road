@@ -1,6 +1,7 @@
-# KhthonLiDAR
+# hopewell-road
 
-LiDAR-based archaeological survey tool for detecting ancient earthworks along the
+LiDAR-based archaeological survey tool for detecting the remains of the Great
+Hopewell Road along the
 [Hopewell Road](https://en.wikipedia.org/wiki/Hopewell_tradition) corridor in Ohio.
 The Hopewell culture (100 BCE – 500 CE) built an extensive network of ceremonial
 earthen roads connecting major sites from Newark to Chillicothe; most of this
@@ -12,12 +13,19 @@ Terrain Models (DTMs) and applies ridge / matched-filter detection algorithms to
 locate parallel wall features consistent with Hopewell road geometry (~38 m
 centre-to-centre spacing, bearing ~32° from north).
 
+> The learned, statewide detector for earthworks of any shape (mounds,
+> enclosures, effigies) used to live here too; it is now the sibling
+> [`earthworks`](../earthworks) repo.  Both were split from `khthonlidar` and
+> share its git history.  The earthworks repo reads this repo's downloaded
+> tiles (`data/saved_file_lists/`, `data/loaded_tiles/`) instead of
+> downloading them again, when the two are checked out side by side.
+
 ---
 
 ## Project Structure
 
 ```text
-khthonlidar/
+hopewell-road/
 ├── parameters.py            Single source of truth for all tunable settings
 ├── utils.py                 Unit-conversion helpers and corridor geometry
 ├── requirements.txt         Core pipeline dependencies
@@ -43,19 +51,16 @@ khthonlidar/
 │   ├── static/
 │   └── requirements.txt
 │
-├── report/                  Automated report generator
-│
-├── earthwork_builder/       Site list + LiDAR crops + Flask app for outlining known earthworks
-├── earthwork_processor/     PCA surface features (dx, dy, |∇z|, …) + augmented training chips
-├── earthwork_model/         Mask R-CNN (ResNet-50-FPN) training on the chips
-├── earthwork_inference/     Statewide tile index + resumable scan saving candidate outlines/points
+├── report/                  Automated report generator (figures + .docx per corridor leg)
+├── experiments/             Parameter sweeps: wall_lab (detection), lidar_lab (SMRF/DTM),
+│                            sentinel_lab (Sentinel-2 history of the sites)
 │
 └── data/
     ├── polygons.json         GeoJSON polygon definitions for survey areas
     └── saved_file_lists/     Cached tile URL lists (per area/sub-area)
 ```
 
-> **Run all scripts from the project root** (`khthonlidar/`).  Relative data paths
+> **Run all scripts from the project root** (`hopewell-road/`).  Relative data paths
 > (`data/`, `data/loaded_tiles/`, etc.) are resolved from the working directory.
 
 ---
@@ -91,7 +96,7 @@ the environment name or Python version:
 AOI2List and laszip-python are tracked as git submodules.  Always clone with:
 
 ```bash
-git clone --recurse-submodules https://github.com/<you>/khthonlidar.git
+git clone --recurse-submodules https://github.com/<you>/hopewell-road.git
 ```
 
 Or if you already have the repo:
@@ -106,8 +111,8 @@ GDAL and PDAL require native system libraries and must be installed via conda
 **before** the Python packages:
 
 ```bash
-conda create -n khthonlidar python=3.11
-conda activate khthonlidar
+conda create -n hopewell-road python=3.11
+conda activate hopewell-road
 conda install -c conda-forge gdal python-pdal
 pip install -r requirements.txt
 ```
@@ -147,24 +152,24 @@ pip install -r app/requirements.txt
 
 ## Quick start — full pipeline
 
-`run_pipeline.py` runs all steps in sequence and accepts `--skip-*` flags for
+`lidar/run_pipeline.py` runs all steps in sequence and accepts `--skip-*` flags for
 any step you have already completed:
 
 ```bash
 # Download, process, and preview a single area
-python run_pipeline.py Hopewell_Road
+python -m lidar.run_pipeline Hopewell_Road
 
 # Two areas merged into one DTM
-python run_pipeline.py Hopewell_Road Circleville_Road
+python -m lidar.run_pipeline Hopewell_Road Circleville_Road
 
 # All flight years separately (Hart Island multi-year dataset)
-python run_pipeline.py Hart_Island --separate-year
+python -m lidar.run_pipeline Hart_Island --separate-year
 
 # Shorthand for both road segments
-python run_pipeline.py full_road
+python -m lidar.run_pipeline full_road
 
 # Resume after tiles are already downloaded
-python run_pipeline.py Hopewell_Road --skip-collect --skip-download
+python -m lidar.run_pipeline Hopewell_Road --skip-collect --skip-download
 ```
 
 ---
@@ -174,7 +179,7 @@ python run_pipeline.py Hopewell_Road --skip-collect --skip-download
 ### 1. Collect tile metadata
 
 ```bash
-python lidar/collect_images.py Hopewell_Road
+python -m lidar.collect_images Hopewell_Road
 ```
 
 Saves tile URL lists to `data/saved_file_lists/<area>_<n>.json`.
@@ -182,7 +187,7 @@ Saves tile URL lists to `data/saved_file_lists/<area>_<n>.json`.
 ### 2. Download tiles
 
 ```bash
-python lidar/generate_tiles.py Hopewell_Road_0
+python -m lidar.generate_tiles Hopewell_Road_0
 ```
 
 Downloads LAZ tiles to `data/loaded_tiles/<area>/raw_tiles/`.
@@ -190,7 +195,7 @@ Downloads LAZ tiles to `data/loaded_tiles/<area>/raw_tiles/`.
 ### 3. Process point clouds → DTM
 
 ```bash
-python lidar/pdal_pipeline.py
+python -m lidar.pdal_pipeline
 ```
 
 Edit the `areas` list at the bottom of the script.  Outputs `merged_dtm.tif`
@@ -199,7 +204,7 @@ per area under `data/loaded_tiles/<area>/`.
 ### 4. Merge sub-areas (optional)
 
 ```bash
-python lidar/merge_multiple_areas.py
+python -m lidar.merge_multiple_areas
 ```
 
 Merges `Circleville_Road_0` … `Circleville_Road_9` into
@@ -209,10 +214,10 @@ Merges `Circleville_Road_0` … `Circleville_Road_9` into
 
 ```bash
 # Hessian ridge + parallel-wall pairing
-python road_model/ridge_detection.py
+python -m road_model.ridge_detection
 
 # Template matched-filter (NCC) detector
-python road_model/road_modeler.py
+python -m road_model.road_modeler
 ```
 
 Both write PNG overlays and JSON coordinate files to `data/locations/`.
@@ -220,7 +225,7 @@ Both write PNG overlays and JSON coordinate files to `data/locations/`.
 ### 6. Quick preview
 
 ```bash
-python lidar/quick_view.py \
+python -m lidar.quick_view \
     --input data/loaded_tiles/Hopewell_Road/merged_dtm.tif \
     --step 100
 ```
@@ -228,7 +233,7 @@ python lidar/quick_view.py \
 ### 7. Launch the map viewer
 
 ```bash
-python app/server.py \
+python -m app.server \
     --folder data/locations/600_600 \
     --dtm    data/loaded_tiles/Whole_Road/merged_dtm.tif \
     --port   5000
@@ -238,52 +243,6 @@ Then open **<http://127.0.0.1:5000>** in a browser.
 
 Both `--folder` and `--dtm` are optional; you can load them from the sidebar UI
 after the server starts.
-
----
-
-## Earthwork detection (learned)
-
-A second, learned pipeline finds earthworks of any shape statewide.  It works
-on a 1 m ground grid in NAD83(2011) / UTM 17N built either from the vendor
-(OGRIP OSIP III, 2020/2021) ground class of the point clouds — no SMRF — or
-from the USGS 3DEP 1 m DEM (`EW_GROUND_SOURCE`; the DEM makes the statewide
-scan download one raster per 2 km block instead of every LAZ tile).  Inputs
-per pixel: dx, dy, |∇z| from local PCA normals, local relief, PCA curvature.
-Run from the project root:
-
-```bash
-# 1. Sites: edit data/earthworks/sites.json (start from earthwork_builder/sites.example.json),
-#    then download + crop LiDAR for each (or use "Add site" in the app)
-python -m earthwork_builder.prepare
-
-# 2. Outline every earthwork in each site window, tick "Reviewed", Save.
-#    Also outline look-alikes (levees, rail grades, terraces...) with a look-alike
-#    type: they become hard negatives.
-python -m earthwork_builder.server          # http://127.0.0.1:5001
-
-# 3. Features + augmented chips (only reviewed sites; split train/val by site)
-python -m earthwork_processor.build_dataset --name v1
-
-# 4. Train (GPU strongly recommended)
-python -m earthwork_model.train --dataset data/earthworks/dataset/v1
-
-# 5. Index every OH_Statewide tile once, then scan (resumable; Ctrl-C safe)
-python -m earthwork_inference.tile_index
-python -m earthwork_inference.scan --run ohio_v1 --checkpoint data/earthworks/models/v1/best.pt
-python -m earthwork_inference.scan --run ohio_v1 --export
-
-# 6. Review: import candidates as builder sites (prefilled, "unverified"), retype
-#    each as earthwork or look-alike, mark reviewed, rebuild the dataset, retrain
-python -m earthwork_builder.import_candidates --run ohio_v1 --min-score 0.7 --limit 50
-python -m earthwork_builder.prepare
-```
-
-Labels (`sites.json`, `sites/*/labels.geojson`) are tracked by git; everything
-else under `data/earthworks/` is regenerable and ignored.  Training and the
-scan need PyTorch — install it from conda-forge into the same environment
-(see `requirements.txt`); a pip wheel clashes with conda's MKL/OpenMP on Windows.
-The ground source is stored in the dataset and checkpoint; the scan always uses
-the source its model was trained on.
 
 ---
 
@@ -297,14 +256,13 @@ Key sections:
 
 | Section | Parameters |
 | ------- | ---------- |
-| §3 Point-cloud ingestion | SMRF ground classification, outlier removal |
+| §3 Point-cloud ingestion | SMRF ground classification, outlier removal, point_io access |
 | §4 DTM pre-processing | LRM radius, Frangi ridge scales |
 | §5 Ridge detection | `SPACING_METERS`, `ROAD_BEARING_DEG`, angle tolerance |
 | §6 Template matching | NCC kernel geometry, score threshold |
 | §7 Area scan | Scan tile size, corridor polygon |
 | §8 Map viewer | Port, hillshade settings, tile renderer |
 | §9 Report | Output coords, DPI, cross-section offsets |
-| §10 Earthworks | Ground classes, pixel size, feature channels, augmentation, training, scan blocks |
 
 ---
 
