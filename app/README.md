@@ -50,8 +50,8 @@ app/
 
 ```json
 [{
-  "line_0_xs": -82.4, "line_0_ys": 40.0,
-  "line_0_xe": -82.4, "line_0_ye": 40.0,
+  "line_0_xs": -82.95, "line_0_ys": 39.60,
+  "line_0_xe": -82.95, "line_0_ye": 39.61,
   "line_0_length": 0.00110, "line_0_angle": 0.96,
   "line_1_xs": "...", "...": "..."
 }]

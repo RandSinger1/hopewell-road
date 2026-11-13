@@ -284,19 +284,42 @@ a tile boundary from being missed entirely."""
 SCAN_MAX_WORKERS: int = 10
 """Maximum parallel worker processes for the tile scan."""
 
+# Exact anchor and site coordinates live in private_coords.py next to this file.
+# It is gitignored and must never be committed: exact earthwork locations stay
+# off git and GitHub.  Without it, private_coords_example.py (tracked) supplies
+# town-centre stand-ins: the corridor geometry is then only approximate and
+# REPORT_COORDS is empty.
+
+def _load_private_coords():
+    import importlib.util
+    from pathlib import Path as _Path
+    here = _Path(__file__).resolve().parent
+    path = here / "private_coords.py"
+    if not path.exists():
+        path = here / "private_coords_example.py"
+    spec = importlib.util.spec_from_file_location("_private_coords", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod, path.name
+
+
+_PRIVATE, PRIVATE_COORDS_FILE = _load_private_coords()
+"""Which file the coordinates below came from ("private_coords.py" = exact)."""
+
 
 # ── Named anchor coordinates ──────────────────────────────────────────────────
 
-CIRCLEVILLE_COORD: tuple = (39.5,  -82.9)
-"""(lat, lon) of Circleville, Ohio — southern anchor of the corridor."""
+CIRCLEVILLE_COORD: tuple = _PRIVATE.CIRCLEVILLE_COORD
+"""(lat, lon) southern anchor of the corridor, at Circleville."""
 
-NEWARK_COORD: tuple = (40.0, -82.4)
-"""(lat, lon) of Newark, Ohio — northern anchor of the corridor."""
+NEWARK_COORD: tuple = _PRIVATE.NEWARK_COORD
+"""(lat, lon) northern anchor of the corridor, at Newark."""
 
-CHILLICOTHE_COORD: tuple = (39.3,-82.9)
-"""(lat, lon) of Chillicothe, Ohio — south-west anchor of the corridor."""
+CHILLICOTHE_COORD: tuple = _PRIVATE.CHILLICOTHE_COORD
+"""(lat, lon) south-west anchor of the corridor, at Chillicothe."""
 
-HIGH_BANKS_COORD: tuple = (39.2, -82.9)
+HIGH_BANKS_COORD: tuple = _PRIVATE.HIGH_BANKS_COORD
+"""(lat, lon) southern anchor of the high_banks leg."""
 
 # ── Corridor polynomial (circleville mode) ────────────────────────────────────
 
@@ -310,10 +333,10 @@ PARABOLA_A: float = 1.391264
 PARABOLA_B: float = 0.199026
 """Coefficient b in the corridor parabola."""
 
-PARABOLA_C: float = 39.5
+PARABOLA_C: float = _PRIVATE.PARABOLA_C
 """Coefficient c (latitude at x = x0) in the corridor parabola."""
 
-PARABOLA_X_OFFSET: float = -82.9
+PARABOLA_X_OFFSET: float = _PRIVATE.PARABOLA_X_OFFSET
 """Longitude offset x0 for the parabola  (= CIRCLEVILLE_COORD[1])."""
 
 
@@ -385,153 +408,9 @@ Can differ from SCAN_DTM_PATH if a higher-resolution mosaic is available."""
 REPORT_DPI: int = 150
 """Resolution for saved report figures (dots per inch)."""
 
-REPORT_COORDS: list = [
-    # Each entry: name (used in filenames), lat/lon (WGS-84), size_m (half-window).
-    # 'note' is displayed in the run log only; it does not affect processing.
-    # Optional 'true_positive_pair_index': index (or list of indices) of the
-    # detected wall pair(s) that are the real earthwork, when more than one
-    # parallel-wall pair is detected. Workflow: run the report once, read the
-    # pair indices off the "12. Detected Pairs" panel in pipeline_steps.png
-    # (every pair is drawn and labelled #0, #1, ... on that first pass), set
-    # this key to that index (e.g. 0) or a list of indices (e.g. [0, 2]) if
-    # more than one pair is a confirmed earthwork, then run again — the
-    # confirmed pair(s) are highlighted and all others greyed out.
-    #
-    # Target-angle resolution (report.report_utils.site_target_angle): by
-    # default the expected wall bearing is auto-detected from whichever of
-    # the three corridor segments passes closest to the site. Two ways to
-    # override that per-entry:
-    #   'mode': 'circleville' | 'chillicothe' | 'high_banks' — force this
-    #       segment's locally expected bearing at the site's longitude
-    #       (use when a site is near where legs diverge and auto-detect
-    #       might pick the wrong one).
-    #   'target_angle': <degrees> — force a fixed angle outright (reported
-    #       as mode 'manual'). Takes priority over 'mode' if both are set.
-    {
-        "name": "Van Voorhis Wall",
-        "lat":   40.0, "lon": -82.4, "size_m": 200,
-        "note": "Ground truth — confirmed earthwork, 41 m width",
-        "mode": "all",
-        "true_positive_pair_index": 0
-    },
-    {
-        "name": "Beaver Run",
-        "lat":   39.9, "lon": -82.5, "size_m": 200,
-        "note": "Proposed route, 37 m width",
-        "mode": "all",
-        "true_positive_pair_index": 0
-    },
-    {
-        "name": "Route 40",
-        "lat":   39.9, "lon": -82.5, "size_m": 200,
-        "note": "Proposed route, 33 m width",
-        "mode": "all",
-        "true_positive_pair_index": 1
-    },
-    # {
-    #     "name": "Blacklick Eastern",
-    #     "lat": 39.9, "lon": -82.5, "size_m": 200,
-    #     "note": "Proposed route",
-    #     "mode": "chillicothe, high_banks"
-    # },
-    # {
-    #     "name": "Route 159",
-    #     "lat": 39.4, "lon": -82.9, "size_m": 200,
-    #     "note": "Not visible, but worth checking out",
-    #     "mode": "chillicothe"
-    # },
-    # {
-    #     "name": "Canal Rd",
-    #     "lat":   39.8, "lon": -82.5, "size_m": 200,
-    #     "note": "Proposed route",
-    #     "mode": "all"
-    #     #"true_positive_pair_index": 0
-    # },
-    # {
-    #     "name": "Mount Zion Farm",
-    #     "lat": 39.7, "lon": -82.7, "size_m": 200,
-    #     "note": "eyeballed this one",
-    #     "mode": "circleville",
-    # },
-    # {
-    #     "name": "Mount Zion Farm 2",
-    #     "lat": 39.7, "lon": -82.7, "size_m": 200,
-    #     "note": "eyeballed this one too"
-    # },
-    {
-        "name": "Wilson Road Resivoir",
-        "lat": 39.7, "lon": -82.7, "size_m": 200,
-        "note": "Very weird",
-        "mode": "circleville",
-    },
-    {
-        "name": "HB Remnant",
-        "lat":39.5, "lon": -82.7, "size_m": 200,
-        "note": "Very correct looking, but faint, high bank work",
-        "mode": "high_banks",
-        "true_positive_pair_index": [0,1]
-
-    },
-    # {
-    #     "name": "Rainbow Drive",
-    #     "lat": 39.7, "lon": -82.6, "size_m": 200,
-    #     "note": "probably trees",
-    #     "mode": "high_banks",
-    # }
-    # {
-    #     "name": "Examine Later 3",
-    #     "lat": 39.7, "lon": -82.7, "size_m": 200,
-    #     "note": "Curvy road looking thing?
-    # }
-    # {
-    #     "name": "Examine Later",
-    #     "lat": 39.6, "lon": -82.7, "size_m": 200,
-    #     "note": "Too much tree cover.  Second pass"
-    # },
-    # {
-    #     "name": "Examine Later 2",
-    #     "lat": 39.5, "lon": -82.8, "size_m": 200,
-    #     "note": "Too much tree cover.  Second pass"
-    # },
-    
-    # {
-    #     "name": "Route 33",
-    #     "lat":   39.7, "lon": -82.6, "size_m": 200,
-    #     "note": "Proposed route",
-    # },
-    # {
-    #     "name": "Woodlot",
-    #     "lat":   39.8, "lon": -82.5, "size_m": 200,
-    #     "note": "Probably irrigation feature",
-    # },
-    # {
-    #     "name": "Route 33",
-    #     "lat":   39.9, "lon": -82.8, "size_m": 200,
-    #     "note": "Very confident, possibly new discovery",
-    # },
-    # {
-    #     "name": "single line near circleville",
-    #     "lat": 39.6, "lon": -82.8, "size_m": 200,
-    #     "note": "single line near circleville"
-    # }
-    # {
-    #     "name": "Shapes in woodlot?",
-    #     "lat": 39.6, "lon": -82.7, "size_m": 200,
-    #     "note": "Shapes in woodlot? "
-    # }
-    # {
-    #     "name": "Farm border, trees? Probably a coincidence",
-    #     "lat": 39.6, "lon": -82.7, "size_m": 200,
-    #     "note": "Farm border, trees? Probably a coincidence",
-    # },
-    # {
-    #     "name": "Weird shape",
-    #     "lat": 39.7, "lon": -82.7, "size_m": 200,
-    #     "note": "Weird shape",
-    # }
-    
-]
-"""Coordinates to include in the report.  Add entries here to process
+REPORT_COORDS: list = _PRIVATE.REPORT_COORDS
+"""Coordinates to include in the report: edit REPORT_COORDS in private_coords.py
+(gitignored; entry format documented there) to process
 additional sites without touching any other file."""
 
 # ── Cross-section parameters ──────────────────────────────────────────────────

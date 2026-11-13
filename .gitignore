@@ -52,3 +52,10 @@ experiments/.cache/
 experiments/output/
 experiments/
 
+
+# Exact earthwork / site locations must never reach git (see private_coords_example.py):
+# everything under data/ stays local (polygons, tile lists, site registry, labels)
+private_coords.py
+app/static/coords.json
+*.geojson
+sites.json

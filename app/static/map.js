@@ -611,7 +611,7 @@ function applySites() {
 // ---------------------------------------------------------------------------
 function _loadRouteWaypoints() {
   fetch("/static/coords.json")
-    .then(r => r.json())
+    .then(r => (r.ok ? r.json() : []))   // coords.json is local-only (gitignored)
     .then(pts => {
       ROUTE_WAYPOINTS = pts;
       _drawReferenceLines();

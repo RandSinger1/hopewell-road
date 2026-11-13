@@ -55,8 +55,8 @@ hopewell-road/
 │                            sentinel_lab (Sentinel-2 history of the sites)
 │
 └── data/
-    ├── polygons.json         GeoJSON polygon definitions for survey areas
-    └── saved_file_lists/     Cached tile URL lists (per area/sub-area)
+    ├── polygons.json         GeoJSON polygon definitions for survey areas (local, untracked)
+    └── saved_file_lists/     Cached tile URL lists (per area/sub-area) (local, untracked)
 ```
 
 > **Run all scripts from the project root** (`hopewell-road/`).  Relative data paths
@@ -270,4 +270,5 @@ Key sections:
 | `Hart_Island` | Hart Island, multiple flight years (2014/2015/2021/2023) |
 | `Zorro_Ranch` | Additional survey area |
 
-Area polygon boundaries are defined in [`data/polygons.json`](data/polygons.json).
+Area polygon boundaries are defined in `data/polygons.json` (local only, never tracked:
+exact site and survey locations stay off git, like `private_coords.py`).
