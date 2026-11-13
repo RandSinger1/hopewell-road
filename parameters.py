@@ -12,10 +12,9 @@ Sections
 3.  Point-cloud ingestion  (pdal_pipeline.py)
 4.  DTM pre-processing     (process_dtm.py)
 5.  Ridge / skeleton detection  (ridge_detection.py)
-6.  Template-matching detector  (road_modeler.py)
-7.  Area scan               (range_searcher.py)
-8.  Map viewer / tile server    (app/server.py, app/dtm_renderer.py)
-9.  Report generation       (report/)
+6.  Area scan               (range_searcher.py)
+7.  Map viewer / tile server    (app/server.py, app/dtm_renderer.py)
+8.  Report generation       (report/)
 
 The statewide earthwork detector (formerly §10 here) lives in the sibling
 earthworks repo, with its own parameters.py.
@@ -269,40 +268,7 @@ against long lines with little spatial coincidence."""
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# §6  TEMPLATE-MATCHING DETECTOR  (road_modeler.py)
-# ═══════════════════════════════════════════════════════════════════════════════
-# This detector uses matched-filter NCC rather than skeletonisation.
-# Parameters are intentionally distinct from §5 because the two detectors
-# operate on different representations (raw LRM vs ridge probability).
-
-TMPL_SPACING_M: float = 38.0
-"""Wall centre-to-centre spacing used when building the matched-filter kernel."""
-
-TMPL_WALL_WIDTH_M: float = 2.0
-"""Gaussian σ (metres) for each individual wall ridge in the kernel."""
-
-TMPL_ANGLE_RANGE: tuple = (110, 160)
-"""Search range (min, max) of wall orientations in degrees CCW from +x."""
-
-TMPL_ANGLE_STEP: int = 1
-"""Angular search increment (degrees)."""
-
-TMPL_KERNEL_LENGTH_M: float = 90.0
-"""Length of the matched-filter kernel along the wall direction (metres)."""
-
-TMPL_THRESHOLD: float = 0.3
-"""Minimum normalised cross-correlation score to accept a detection peak."""
-
-TMPL_MIN_DISTANCE_M: float = 1.0
-"""Minimum spatial separation (metres) between two accepted detection peaks."""
-
-TMPL_METHOD: str = "rotation"
-"""'rotation' — fast separable filter (recommended for large images).
-'cv2_match' — compact OpenCV kernels, slightly more accurate."""
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# §7  AREA SCAN  (range_searcher.py)
+# §6  AREA SCAN  (range_searcher.py)
 # ═══════════════════════════════════════════════════════════════════════════════
 
 SCAN_DTM_PATH: str = "data/loaded_tiles/Whole_Road/merged_dtm.tif"
@@ -352,7 +318,7 @@ PARABOLA_X_OFFSET: float = -82.9
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# §8  MAP VIEWER / TILE SERVER  (app/server.py, app/dtm_renderer.py)
+# §7  MAP VIEWER / TILE SERVER  (app/server.py, app/dtm_renderer.py)
 # ═══════════════════════════════════════════════════════════════════════════════
 
 SERVER_PORT: int = 5000
@@ -408,7 +374,7 @@ order from coarsest to finest, so the most-visible tiles are cached first."""
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# §9  REPORT GENERATION  (report/)
+# §8  REPORT GENERATION  (report/)
 # ═══════════════════════════════════════════════════════════════════════════════
 
 REPORT_DTM_PATH: str = "data/loaded_tiles/Whole_Road/merged_dtm.tif"

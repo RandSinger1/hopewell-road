@@ -9,7 +9,7 @@ infrastructure is invisible at ground level but survives as subtle parallel eart
 banks detectable in high-resolution terrain data.
 
 This project processes publicly available USGS LiDAR point-cloud data into Digital
-Terrain Models (DTMs) and applies ridge / matched-filter detection algorithms to
+Terrain Models (DTMs) and applies Hessian ridge detection and parallel-wall pairing to
 locate parallel wall features consistent with Hopewell road geometry (~38 m
 centre-to-centre spacing, bearing ~32° from north).
 
@@ -41,7 +41,6 @@ hopewell-road/
 ├── road_model/              Feature-detection algorithms
 │   ├── process_dtm.py       Shared raster helpers (median smoothing, LRM, Frangi ridge)
 │   ├── ridge_detection.py   Hessian ridge + parallel-wall pairing
-│   ├── road_modeler.py      Template matched-filter (NCC) detector
 │   └── range_searcher.py    Tile-parallel corridor scan
 │
 ├── app/                     Interactive map viewer (Flask + Leaflet)
@@ -210,10 +209,7 @@ python -m road_model.range_searcher --mode chillicothe     # or circleville / hi
 
 Tiles the corridor and runs the Hessian ridge + parallel-wall pairing detector
 (`road_model/ridge_detection.py`) on each tile; writes PNG overlays and
-`line_overlay.json` files to `data/locations/<mode>_<w>_<h>/`.  The template
-matched-filter detector (`road_model/road_modeler.py`,
-`detect_parallel_walls_template`) is a library alternative with no command of
-its own (settings: `parameters.py` §6).
+`line_overlay.json` files to `data/locations/<mode>_<w>_<h>/`.
 
 ### 5. Report
 
@@ -259,10 +255,9 @@ Key sections:
 | §3 Point-cloud ingestion | SMRF ground classification, outlier removal, point_io access |
 | §4 DTM pre-processing | LRM radius, Frangi ridge scales |
 | §5 Ridge detection | `SPACING_METERS`, `ROAD_BEARING_DEG`, angle tolerance |
-| §6 Template matching | NCC kernel geometry, score threshold (road_modeler defaults) |
-| §7 Area scan | Scan tile size, overlap, corridor anchors, parabola coefficients |
-| §8 Map viewer | Port, hillshade settings, tile renderer |
-| §9 Report | Output coords, DPI, cross-section offsets |
+| §6 Area scan | Scan tile size, overlap, corridor anchors, parabola coefficients |
+| §7 Map viewer | Port, hillshade settings, tile renderer |
+| §8 Report | Output coords, DPI, cross-section offsets |
 
 ---
 
