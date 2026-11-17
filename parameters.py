@@ -17,7 +17,7 @@ Sections
 8.  Report generation       (report/)
 
 The statewide earthwork detector (formerly §10 here) lives in the sibling
-earthworks repo, with its own parameters.py.
+ohio-earthwork-detector repo, with its own parameters.py.
 """
 
 
@@ -284,11 +284,11 @@ a tile boundary from being missed entirely."""
 SCAN_MAX_WORKERS: int = 10
 """Maximum parallel worker processes for the tile scan."""
 
-# Exact anchor and site coordinates live in private_coords.py next to this file.
-# It is gitignored and must never be committed: exact earthwork locations stay
-# off git and GitHub.  Without it, private_coords_example.py (tracked) supplies
-# town-centre stand-ins: the corridor geometry is then only approximate and
-# REPORT_COORDS is empty.
+# Survey/candidate site coordinates (REPORT_COORDS) live in private_coords.py next
+# to this file.  It is gitignored and must never be committed: exact site locations
+# stay off git and GitHub.  Without it, private_coords_example.py (tracked) supplies
+# an empty REPORT_COORDS.  The corridor anchors below are well-known public
+# earthworks and may stay exact in git.
 
 def _load_private_coords():
     import importlib.util
@@ -304,21 +304,21 @@ def _load_private_coords():
 
 
 _PRIVATE, PRIVATE_COORDS_FILE = _load_private_coords()
-"""Which file the coordinates below came from ("private_coords.py" = exact)."""
+"""Which file REPORT_COORDS came from ("private_coords.py" = the real list)."""
 
 
 # ── Named anchor coordinates ──────────────────────────────────────────────────
 
-CIRCLEVILLE_COORD: tuple = _PRIVATE.CIRCLEVILLE_COORD
+CIRCLEVILLE_COORD: tuple = (39.599460,  -82.948154)
 """(lat, lon) southern anchor of the corridor, at Circleville."""
 
-NEWARK_COORD: tuple = _PRIVATE.NEWARK_COORD
+NEWARK_COORD: tuple = (40.052548, -82.444544)
 """(lat, lon) northern anchor of the corridor, at Newark."""
 
-CHILLICOTHE_COORD: tuple = _PRIVATE.CHILLICOTHE_COORD
+CHILLICOTHE_COORD: tuple = (39.3864135,-82.9824134)
 """(lat, lon) south-west anchor of the corridor, at Chillicothe."""
 
-HIGH_BANKS_COORD: tuple = _PRIVATE.HIGH_BANKS_COORD
+HIGH_BANKS_COORD: tuple = (39.28886498, -82.9220224)
 """(lat, lon) southern anchor of the high_banks leg."""
 
 # ── Corridor polynomial (circleville mode) ────────────────────────────────────
@@ -333,10 +333,10 @@ PARABOLA_A: float = 1.391264
 PARABOLA_B: float = 0.199026
 """Coefficient b in the corridor parabola."""
 
-PARABOLA_C: float = _PRIVATE.PARABOLA_C
+PARABOLA_C: float = 39.599460
 """Coefficient c (latitude at x = x0) in the corridor parabola."""
 
-PARABOLA_X_OFFSET: float = _PRIVATE.PARABOLA_X_OFFSET
+PARABOLA_X_OFFSET: float = -82.9459666
 """Longitude offset x0 for the parabola  (= CIRCLEVILLE_COORD[1])."""
 
 
@@ -407,6 +407,11 @@ Can differ from SCAN_DTM_PATH if a higher-resolution mosaic is available."""
 
 REPORT_DPI: int = 150
 """Resolution for saved report figures (dots per inch)."""
+
+REPORT_MAP_SHOW_LATLON: bool = False
+"""Draw latitude/longitude tick labels on the corridor overview maps
+(report/overview_map.py).  Off by default: the maps place candidate sites to
+~0.01°, and exact site locations are not published (see private_coords.py)."""
 
 REPORT_COORDS: list = _PRIVATE.REPORT_COORDS
 """Coordinates to include in the report: edit REPORT_COORDS in private_coords.py

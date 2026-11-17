@@ -13,13 +13,6 @@ Terrain Models (DTMs) and applies Hessian ridge detection and parallel-wall pair
 locate parallel wall features consistent with Hopewell road geometry (~38 m
 centre-to-centre spacing, bearing ~32° from north).
 
-> The learned, statewide detector for earthworks of any shape (mounds,
-> enclosures, effigies) used to live here too; it is now the sibling
-> [`earthworks`](../earthworks) repo.  Both were split from `khthonlidar` and
-> share its git history.  The earthworks repo reads this repo's downloaded
-> tiles (`data/saved_file_lists/`, `data/loaded_tiles/`) instead of
-> downloading them again, when the two are checked out side by side.
-
 ---
 
 ## Project Structure

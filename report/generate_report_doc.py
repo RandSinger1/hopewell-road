@@ -14,7 +14,7 @@ Structure
         pipeline_steps/13_hillshade_perp32.png
     Chillicothe Leg
       (same; duplicate sites cross-reference first occurrence)
-    High Banks Leg
+    High Bank Leg
       (same)
 
 Figure captions use Word SEQ Figure fields so numbering is maintained
@@ -43,7 +43,7 @@ _OUTPUT_DIR = Path(__file__).parent / "output"
 _PATH_DISPLAY = {
     "circleville": "Circleville",
     "chillicothe": "Chillicothe",
-    "high_banks":  "High Banks",
+    "high_banks":  "High Bank",
 }
 
 

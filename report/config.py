@@ -7,6 +7,7 @@ Report scripts do ``import config as cfg`` and access names like
 from parameters import (  # noqa: F401 (re-exported as cfg.*)
     REPORT_DTM_PATH          as DTM_PATH,
     REPORT_DPI               as DPI,
+    REPORT_MAP_SHOW_LATLON   as MAP_SHOW_LATLON,
     REPORT_COORDS,
     ROAD_BEARING_DEG,
     CROSS_SECTION_OFFSETS_M,

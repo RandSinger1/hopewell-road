@@ -157,7 +157,7 @@ def _tiles_chillicothe(size_x, size_y, overlap, half_width_meters=5000):
 
 
 def _tiles_high_banks(size_x, size_y, overlap, half_width_meters=5000):
-    """Straight-line corridor from Newark to High Banks."""
+    """Straight-line corridor from Newark to High Bank."""
     half_width_deg = convert_meters_degrees_pixels(METERS, DEGREES, 0, half_width_meters)[1]
     x0, y0 = HIGH_BANKS[1], HIGH_BANKS[0]
     x1, y1 = NEWARK[1], NEWARK[0]
@@ -184,7 +184,7 @@ _CITIES = {
     'Circleville': CIRCLEVILLE,
     'Newark':      NEWARK,
     'Chillicothe': CHILLICOTHE,
-    'High Banks':  HIGH_BANKS,
+    'High Bank':   HIGH_BANKS,
 }
 
 def preview_tiles(tiles, mode, size_x, size_y, dtm_path=None, dtm_px=400):
@@ -264,12 +264,12 @@ def preview_tiles(tiles, mode, size_x, size_y, dtm_path=None, dtm_px=400):
         label='Newark–Chillicothe',
     )
 
-    # Straight line Newark → High Banks
+    # Straight line Newark → High Bank
     ax.plot(
         [NEWARK[1], HIGH_BANKS[1]],
         [NEWARK[0], HIGH_BANKS[0]],
         color='mediumorchid', linewidth=1.5, linestyle='--', zorder=5,
-        label='Newark–High Banks',
+        label='Newark–High Bank',
     )
 
     # Named cities

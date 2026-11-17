@@ -4,7 +4,7 @@ overview_map.py — Study-corridor overview + per-site figures.
 Outputs
 -------
 overview_map.png
-    Full corridor map: cities, Newark–Chillicothe and Newark–High Banks
+    Full corridor map: cities, Newark–Chillicothe and Newark–High Bank
     azimuth lines, every REPORT_COORDS site labelled with its detected bearing.
 
 overview_<name>.png  (one per coord)
@@ -29,8 +29,12 @@ _CITIES = {
     "Newark":      parameters.NEWARK_COORD,
     "Circleville": parameters.CIRCLEVILLE_COORD,
     "Chillicothe": parameters.CHILLICOTHE_COORD,
-    "High Banks":  parameters.HIGH_BANKS_COORD,
+    "High Bank":   parameters.HIGH_BANKS_COORD,
 }
+
+# display names for the corridor paths (internal keys stay e.g. "high_banks")
+_PATH_LABELS = {"chillicothe": "Chillicothe", "circleville": "Circleville",
+                "high_banks": "High Bank"}
 
 _HALF_LINE_M = 5_000
 
@@ -103,7 +107,7 @@ def _newark_chillicothe_bearing() -> float:
 
 def _newark_high_banks_bearing() -> float:
     n_lat, n_lon = _CITIES["Newark"]
-    h_lat, h_lon = _CITIES["High Banks"]
+    h_lat, h_lon = _CITIES["High Bank"]
     cos_lat = np.cos(np.radians((n_lat + h_lat) / 2))
     return np.degrees(np.arctan2((h_lon - n_lon) * cos_lat, h_lat - n_lat)) % 360
 
@@ -147,8 +151,12 @@ def _draw_corridor_map(ax: plt.Axes, sites: list[dict],
     ax.tick_params(colors="gray", labelsize=7)
     for sp in ax.spines.values():
         sp.set_edgecolor("#333333")
-    ax.set_xlabel("Longitude", fontsize=8, color="lightgray")
-    ax.set_ylabel("Latitude",  fontsize=8, color="lightgray")
+    if cfg.MAP_SHOW_LATLON:
+        ax.set_xlabel("Longitude", fontsize=8, color="lightgray")
+        ax.set_ylabel("Latitude",  fontsize=8, color="lightgray")
+    else:
+        # no lat/lon readout: the map would otherwise locate candidate sites
+        ax.tick_params(bottom=False, left=False, labelbottom=False, labelleft=False)
 
     # Newark → Chillicothe azimuth line
     n_lat, n_lon = _CITIES["Newark"]
@@ -164,8 +172,8 @@ def _draw_corridor_map(ax: plt.Axes, sites: list[dict],
                 xytext=(-30, 6), textcoords="offset points",
                 fontsize=7, color="#a0c8e0", alpha=0.85)
 
-    # Newark → High Banks azimuth line
-    h_lat, h_lon = _CITIES["High Banks"]
+    # Newark → High Bank azimuth line
+    h_lat, h_lon = _CITIES["High Bank"]
     az_hb = _newark_high_banks_bearing()
     ax.plot([n_lon, h_lon], [n_lat, h_lat],
             color="#cc99ff", linewidth=1.5, linestyle="--",
@@ -246,7 +254,7 @@ def _legend_handles(path_name: str | None) -> list:
         mlines.Line2D([], [], color="#a0c8e0", linewidth=1.5,
                       linestyle="--", label="Newark – Chillicothe"),
         mlines.Line2D([], [], color="#cc99ff", linewidth=1.5,
-                      linestyle="--", label="Newark – High Banks"),
+                      linestyle="--", label="Newark – High Bank"),
     ]
     handles.append(mlines.Line2D([], [], color="#90d090", linewidth=1.5,
                                  linestyle="--", label="Circleville parabola"))
@@ -299,7 +307,7 @@ def generate_overview_map(coords: list[dict], dtm_path: str, output_dir: Path,
     # corridor overview (all sites equal weight)
     fig, ax = plt.subplots(figsize=(11, 9), facecolor="#1a1a1a")
     ax.set_facecolor("#0d1117")
-    path_label = f"  ·  {path_name}" if path_name else ""
+    path_label = f"  ·  {_PATH_LABELS.get(path_name, path_name)}" if path_name else ""
     ax.set_title(
         f"Hopewell Earthwork Corridor{path_label}  ·  Detected wall bearings",
         fontsize=12, color="white", pad=10,

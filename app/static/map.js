@@ -282,7 +282,7 @@ function _fetchDtmStats() {
 function _triggerPriorityPrewarm(lo, hi) {
   // Corridors: [lon1, lat1, lon2, lat2]
   // Newark → Chillicothe (main Hopewell Road axis)
-  // Newark → High Banks (straight-line road)
+  // Newark → High Bank (straight-line road)
   // Newark → Circleville (secondary Hopewell corridor)
   const corridors = [
     [NEWARK[1], NEWARK[0], CHILLICOTHE[1], CHILLICOTHE[0]],
@@ -653,7 +653,7 @@ function _drawReferenceLines() {
     L.polyline([NEWARK, CHILLICOTHE], { ...dashOpts, color: "#44aaff" }).addTo(refLayer);
   }
 
-  // Newark → High Banks (straight-line road, treated like Newark → Chillicothe)
+  // Newark → High Bank (straight-line road, treated like Newark → Chillicothe)
   L.polyline([NEWARK, HIGH_BANKS], { ...dashOpts, color: "#cc66ff" }).addTo(refLayer);
 }
 
